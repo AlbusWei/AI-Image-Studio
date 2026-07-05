@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import http from 'node:http';
 import { Command } from 'commander';
-import { initEnvironment } from './setup.mjs';
+import { initEnvironment, configureApiClient } from './setup.mjs';
 
 // ─── 环境初始化（必须在 import adapter 之前） ─────────────────────────────
 initEnvironment();
@@ -88,7 +88,8 @@ function outputResult(data) {
 }
 
 /**
- * JSON 错误输出到 stderr + exit。
+ * JSON 错误输出到 stderr + 设置 exit code。
+ * 使用 process.exitCode 而非 process.exit()，让 stderr I/O 有机会 flush。
  * @param {Object} error - { error, message, code, ... }
  * @param {number} [exitCode=1]
  */
@@ -99,7 +100,7 @@ function outputError(error, exitCode = EXIT.ERROR) {
     ...(error.details && { details: error.details }),
   };
   process.stderr.write(JSON.stringify(payload) + '\n');
-  process.exit(exitCode);
+  process.exitCode = exitCode; // 不强制退出，让 event loop 自然 drain
 }
 
 /** 静默模式感知的 stderr 日志 */
@@ -116,12 +117,12 @@ program
   .description('AI Image Studio CLI — 通过命令行与 AI Image Studio 交互')
   .version('0.1.0')
   .option('--port <port>', 'api-server 端口 (默认: AIS_PORT 环境变量或 19527)')
-  .option('--json', '强制 JSON 输出 (默认已启用)', true)
+  .option('--json', '强制 JSON 输出 (默认已启用, reserved for future use)', true)
   .option('--quiet', '抑制 stderr 进度信息', false);
 
 /**
- * 命令 action 的通用前置处理：解析端口 + 检测连接。
- * 返回 { port, quiet }。连接失败时直接 exit(2)。
+ * 命令 action 的通用前置处理：配置 axios + 解析端口 + 检测连接。
+ * 返回 { port, quiet }，失败时返回 null（调用方需守卫）。
  */
 async function preflight(options) {
   const port = resolvePort(options.port);
@@ -129,15 +130,20 @@ async function preflight(options) {
 
   logStderr(quiet, `[ais] Connecting to api-server at 127.0.0.1:${port}...`);
 
+  // 配置 axios baseURL（动态 import adapter 并设置）
+  await configureApiClient(port);
+
   const reachable = await checkServerReachable(port);
   if (!reachable) {
     outputError({
       error: 'SERVER_UNREACHABLE',
       message: `Cannot connect to api-server at 127.0.0.1:${port}. Is the Electron app running?`,
-      port,
+      details: { port },
     }, EXIT.SERVER_UNREACHABLE);
+    return null; // signal failure
   }
 
+  logStderr(quiet, '[ais] api-server is running');
   return { port, quiet };
 }
 
@@ -153,7 +159,9 @@ program
   .option('--ratio <ratio>', '宽高比')
   .option('-o, --output <path>', '输出文件路径')
   .action(async (opts, cmd) => {
-    const { port, quiet } = await preflight(cmd.parent.opts());
+    const ctx = await preflight(cmd.parent.opts());
+    if (!ctx) return;
+    const { port, quiet } = ctx;
     // TODO: 后续 task 实现完整逻辑
     outputResult({
       command: 'gen',
@@ -170,7 +178,9 @@ program
   .argument('<prompt>', '原始提示词')
   .option('-m, --model <id>', '目标生成模型')
   .action(async (prompt, opts, cmd) => {
-    const { port, quiet } = await preflight(cmd.parent.opts());
+    const ctx = await preflight(cmd.parent.opts());
+    if (!ctx) return;
+    const { port } = ctx;
     outputResult({
       command: 'expand',
       status: 'not_implemented',
@@ -189,7 +199,9 @@ program
   .option('--limit <n>', '返回数量', '20')
   .option('--offset <n>', '偏移量', '0')
   .action(async (opts, cmd) => {
-    const { port, quiet } = await preflight(cmd.parent.opts());
+    const ctx = await preflight(cmd.parent.opts());
+    if (!ctx) return;
+    const { port } = ctx;
     outputResult({
       command: 'list',
       status: 'not_implemented',
@@ -204,7 +216,9 @@ program
   .description('获取图像详情')
   .argument('<id>', '图像 ID')
   .action(async (id, opts, cmd) => {
-    const { port } = await preflight(cmd.parent.opts());
+    const ctx = await preflight(cmd.parent.opts());
+    if (!ctx) return;
+    const { port } = ctx;
     outputResult({
       command: 'get',
       status: 'not_implemented',
@@ -219,7 +233,9 @@ program
   .command('stats')
   .description('获取图库统计信息')
   .action(async (opts, cmd) => {
-    const { port } = await preflight(cmd.parent.opts());
+    const ctx = await preflight(cmd.parent.opts());
+    if (!ctx) return;
+    const { port } = ctx;
     outputResult({
       command: 'stats',
       status: 'not_implemented',
@@ -235,7 +251,9 @@ program
   .argument('<id>', '图像 ID')
   .option('--confirm', '跳过确认提示')
   .action(async (id, opts, cmd) => {
-    const { port } = await preflight(cmd.parent.opts());
+    const ctx = await preflight(cmd.parent.opts());
+    if (!ctx) return;
+    const { port } = ctx;
     outputResult({
       command: 'delete',
       status: 'not_implemented',
@@ -252,7 +270,9 @@ program
   .argument('<id>', '图像 ID')
   .argument('<folder>', '目标文件夹')
   .action(async (id, folder, opts, cmd) => {
-    const { port } = await preflight(cmd.parent.opts());
+    const ctx = await preflight(cmd.parent.opts());
+    if (!ctx) return;
+    const { port } = ctx;
     outputResult({
       command: 'move',
       status: 'not_implemented',
@@ -270,7 +290,9 @@ program
   .argument('<id>', '图像 ID')
   .option('--unset', '取消收藏')
   .action(async (id, opts, cmd) => {
-    const { port } = await preflight(cmd.parent.opts());
+    const ctx = await preflight(cmd.parent.opts());
+    if (!ctx) return;
+    const { port } = ctx;
     outputResult({
       command: 'favorite',
       status: 'not_implemented',
@@ -286,7 +308,9 @@ program
   .description('列出或管理文件夹')
   .option('--create <name>', '创建新文件夹')
   .action(async (opts, cmd) => {
-    const { port } = await preflight(cmd.parent.opts());
+    const ctx = await preflight(cmd.parent.opts());
+    if (!ctx) return;
+    const { port } = ctx;
     outputResult({
       command: 'folders',
       status: 'not_implemented',
@@ -301,7 +325,9 @@ program
   .description('查看任务中心状态')
   .option('--id <taskId>', '查看指定任务详情')
   .action(async (opts, cmd) => {
-    const { port } = await preflight(cmd.parent.opts());
+    const ctx = await preflight(cmd.parent.opts());
+    if (!ctx) return;
+    const { port } = ctx;
     outputResult({
       command: 'tasks',
       status: 'not_implemented',
@@ -318,7 +344,9 @@ program
   .option('-m, --model <id>', '模型 ID', 'qwen-image-3')
   .option('--concurrency <n>', '并发数', '2')
   .action(async (opts, cmd) => {
-    const { port } = await preflight(cmd.parent.opts());
+    const ctx = await preflight(cmd.parent.opts());
+    if (!ctx) return;
+    const { port } = ctx;
     outputResult({
       command: 'batch',
       status: 'not_implemented',
