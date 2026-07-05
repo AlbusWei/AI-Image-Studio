@@ -149,7 +149,7 @@ function registerFileIpcHandlers(ipcMain, fileManager) {
     const result = await fileManager.readImage(id);
     if (result) {
       return {
-        buffer: Array.from(result.buffer),
+        buffer: result.buffer,
         mimeType: result.mimeType,
         filePath: result.filePath,
       };
@@ -173,7 +173,7 @@ function registerFileIpcHandlers(ipcMain, fileManager) {
     const result = await fileManager.readThumbnail(id);
     if (result) {
       return {
-        buffer: Array.from(result.buffer),
+        buffer: result.buffer,
         mimeType: result.mimeType,
         filePath: result.filePath,
       };

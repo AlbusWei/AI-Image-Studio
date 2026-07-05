@@ -3,11 +3,11 @@ schema_version: 1
 locale: zh-CN
 branch: master
 nodes_managed: true
-exported_at: "2026-07-05T16:20:33Z"
+exported_at: "2026-07-05T16:44:22Z"
 modules:
     "":
-        dir_name: AI Image Studio 项目契约与验收层
-        title: AI Image Studio 项目契约与验收层
+        dir_name: AI Image Studio 项目契约与交付层
+        title: AI Image Studio 项目契约与交付层
         scope:
             - README.md
             - .gitignore

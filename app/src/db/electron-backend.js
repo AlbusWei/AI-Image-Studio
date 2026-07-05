@@ -84,6 +84,24 @@ export function createElectronBackend(electronAPI) {
       rows = rows.filter((r) => r.status !== 'pending' && r.status !== 'failed');
     }
 
+    // Load thumbnail blobs from file system for gallery display
+    for (const row of rows) {
+      try {
+        const thumbResult = await fs.readThumbnail(row.id);
+        if (thumbResult && thumbResult.buffer) {
+          const buf = thumbResult.buffer;
+          const arrayBuf = buf instanceof ArrayBuffer
+            ? buf
+            : (ArrayBuffer.isView(buf) ? buf.buffer : new Uint8Array(buf).buffer);
+          row.thumbnailBlob = new Blob([arrayBuf], { type: thumbResult.mimeType || 'image/jpeg' });
+          row.thumbnailUrl = URL.createObjectURL(row.thumbnailBlob);
+        }
+        row.hasImage = true;
+      } catch (e) {
+        // thumbnail not available
+      }
+    }
+
     return rows;
   }
 

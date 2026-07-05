@@ -182,8 +182,10 @@ export function createCancellable() {
 export function proxyImageUrl(url) {
   if (!url) return url;
   if (url.startsWith('data:') || url.startsWith('blob:') || url.includes('/api/proxy-image')) return url;
-  // Electron 环境下需要使用完整的 API server URL
-  // resolveApiBase() 会在请求拦截器中处理，这里使用相对路径即可
+  // Electron production mode: need full URL to api-server
+  if (typeof window !== 'undefined' && window.__electronApiPort) {
+    return `http://127.0.0.1:${window.__electronApiPort}/api/proxy-image?url=${encodeURIComponent(url)}`;
+  }
   return `/api/proxy-image?url=${encodeURIComponent(url)}`;
 }
 

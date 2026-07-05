@@ -6,18 +6,29 @@
 - [preload.cjs](file://app/electron/preload.cjs)
 - [ipc-handlers.cjs](file://app/electron/ipc-handlers.cjs)
 - [database/index.cjs](file://app/electron/database/index.cjs)
+- [database/queries.cjs](file://app/electron/database/queries.cjs)
 - [file-manager.cjs](file://app/electron/file-manager.cjs)
 - [api-server.cjs](file://app/electron/api-server.cjs)
 - [protocol.cjs](file://app/electron/protocol.cjs)
 - [App.jsx](file://app/src/App.jsx)
 - [main.jsx](file://app/src/main.jsx)
 - [database.js](file://app/src/db/database.js)
+- [http-backend.js](file://app/src/db/http-backend.js)
 - [task-engine.js](file://app/src/services/task-engine.js)
 - [useTaskStore.js](file://app/src/stores/useTaskStore.js)
 - [notification.js](file://app/src/services/notification.js)
 - [vite.config.js](file://app/vite.config.js)
 - [package.json](file://app/package.json)
 </cite>
+
+## 更新摘要
+**所做更改**   
+- 新增集成REST API服务器章节，详细说明25+个数据库端点
+- 更新API代理服务器部分，反映新的数据库API路由
+- 新增HTTP后端章节，说明浏览器模式下的SQLite访问
+- 更新开发工作流章节，反映改进的`npm run dev`命令
+- 更新架构总览图，包含新的REST API层
+- 更新详细组件分析，涵盖新的API服务器功能
 
 ## 目录
 1. [简介](#简介)
@@ -32,7 +43,9 @@
 10. [附录](#附录)
 
 ## 简介
-本项目是一个基于 Electron + React 的 AI 图像生成工作站，提供多模型统一工作流、提示词工程、批量生成、知识库与全量资产管理能力。主进程负责数据库（SQLite via sql.js）、本地文件系统、API 代理、自定义协议与 OSS 同步；渲染进程使用 React + Zustand 管理 UI 状态，并通过 IPC 安全访问主进程能力。
+本项目是一个基于 Electron + React 的 AI 图像生成工作站，提供多模型统一工作流、提示词工程、批量生成、知识库与全量资产管理能力。主进程负责数据库（SQLite via sql.js）、本地文件系统、REST API服务器、API 代理、自定义协议与 OSS 同步；渲染进程使用 React + Zustand 管理 UI 状态，并通过 IPC 或 HTTP API 安全访问主进程能力。
+
+**更新** 新增了集成的REST API服务器，暴露25+个数据库端点，支持浏览器模式下的SQLite访问。
 
 ## 项目结构
 - 主进程（Electron）
@@ -40,13 +53,15 @@
   - 预加载脚本与安全桥接：[preload.cjs](file://app/electron/preload.cjs)
   - IPC 路由与数据库查询映射：[ipc-handlers.cjs](file://app/electron/ipc-handlers.cjs)
   - SQLite 初始化与持久化：[database/index.cjs](file://app/electron/database/index.cjs)
+  - 数据库查询层：[database/queries.cjs](file://app/electron/database/queries.cjs)
   - 本地图片存储层：[file-manager.cjs](file://app/electron/file-manager.cjs)
-  - 内嵌 HTTP API 代理服务器：[api-server.cjs](file://app/electron/api-server.cjs)
+  - 内嵌 REST API 服务器：[api-server.cjs](file://app/electron/api-server.cjs)
   - 自定义 app:// 协议处理：[protocol.cjs](file://app/electron/protocol.cjs)
 - 渲染进程（React/Vite）
   - 应用壳与路由：[App.jsx](file://app/src/App.jsx)
   - 启动引导与设置加载：[main.jsx](file://app/src/main.jsx)
-  - 数据库策略门面（Dexie/Electron 后端选择）：[database.js](file://app/src/db/database.js)
+  - 数据库策略门面（Dexie/Electron/HTTP 后端选择）：[database.js](file://app/src/db/database.js)
+  - HTTP 后端实现（浏览器模式）：[http-backend.js](file://app/src/db/http-backend.js)
   - 任务引擎与通知：[task-engine.js](file://app/src/services/task-engine.js)、[notification.js](file://app/src/services/notification.js)
   - 任务状态管理（Zustand）：[useTaskStore.js](file://app/src/stores/useTaskStore.js)
 - 构建与打包
@@ -60,6 +75,7 @@ M["main.cjs"]
 P["preload.cjs"]
 H["ipc-handlers.cjs"]
 DBI["database/index.cjs"]
+DBQ["database/queries.cjs"]
 FM["file-manager.cjs"]
 API["api-server.cjs"]
 PR["protocol.cjs"]
@@ -68,6 +84,7 @@ subgraph "渲染进程"
 RMain["main.jsx"]
 App["App.jsx"]
 DBF["db/database.js"]
+HTTPB["db/http-backend.js"]
 TE["services/task-engine.js"]
 TS["stores/useTaskStore.js"]
 NTF["services/notification.js"]
@@ -75,11 +92,13 @@ end
 M --> P
 M --> H
 M --> DBI
+M --> DBQ
 M --> FM
 M --> API
 M --> PR
 RMain --> App
 App --> DBF
+DBF --> HTTPB
 App --> TS
 TS --> TE
 TE --> NTF
@@ -91,12 +110,14 @@ DBF --> P
 - [preload.cjs:1-82](file://app/electron/preload.cjs#L1-L82)
 - [ipc-handlers.cjs:1-63](file://app/electron/ipc-handlers.cjs#L1-L63)
 - [database/index.cjs:1-93](file://app/electron/database/index.cjs#L1-L93)
+- [database/queries.cjs:1-721](file://app/electron/database/queries.cjs#L1-L721)
 - [file-manager.cjs:1-196](file://app/electron/file-manager.cjs#L1-L196)
-- [api-server.cjs:1-250](file://app/electron/api-server.cjs#L1-L250)
+- [api-server.cjs:1-606](file://app/electron/api-server.cjs#L1-L606)
 - [protocol.cjs:1-93](file://app/electron/protocol.cjs#L1-L93)
 - [main.jsx:1-32](file://app/src/main.jsx#L1-L32)
 - [App.jsx:1-364](file://app/src/App.jsx#L1-L364)
-- [database.js:1-98](file://app/src/db/database.js#L1-L98)
+- [database.js:1-114](file://app/src/db/database.js#L1-L114)
+- [http-backend.js:1-345](file://app/src/db/http-backend.js#L1-L345)
 - [task-engine.js:1-319](file://app/src/services/task-engine.js#L1-L319)
 - [useTaskStore.js:1-173](file://app/src/stores/useTaskStore.js#L1-L173)
 - [notification.js:1-113](file://app/src/services/notification.js#L1-L113)
@@ -107,15 +128,15 @@ DBF --> P
 
 ## 核心组件
 - 主进程入口与初始化流程
-  - 注册特权 scheme、初始化 SQLite、注册 IPC、创建 FileManager、注册 app:// 协议、启动 API 代理、初始化 OSS 同步、创建主窗口并监听页面导航与迁移触发。
+  - 注册特权 scheme、初始化 SQLite、注册 IPC、创建 FileManager、注册 app:// 协议、启动 REST API 服务器、初始化 OSS 同步、创建主窗口并监听页面导航与迁移触发。
 - 预加载桥接
   - 通过 contextBridge 暴露 db/fs/oss/app 等安全接口给渲染进程，所有调用均经 ipcRenderer.invoke 转发到主进程。
 - 数据库层
-  - 主进程侧使用 sql.js 在内存中运行 SQLite，按 300ms 节流写入磁盘；渲染进程通过策略门面自动选择 Dexie（浏览器）或 IPC（Electron）。
+  - 主进程侧使用 sql.js 在内存中运行 SQLite，按 300ms 节流写入磁盘；渲染进程通过策略门面自动选择 Dexie（浏览器）、IPC（Electron）或 HTTP（浏览器访问Electron）。
 - 文件系统层
   - 统一管理 originals/thumbnails/imports 三类图片读写与统计，IPC 暴露保存/读取/删除/统计接口。
-- API 代理服务器
-  - 内嵌 http 服务，将 /api/qwen、/api/evolink、/api/oss、/api/llm、/api/proxy-image 转发至上游，注入鉴权头并回写响应。
+- REST API 服务器
+  - 内嵌 http 服务，提供 /api/db/* 数据库REST端点、/api/qwen、/api/evolink、/api/oss、/api/llm、/api/proxy-image 外部API代理，注入鉴权头并回写响应。
 - 自定义协议
   - 注册 app:// 为特权 scheme，将 images/originals 与 thumbnails 路径映射到本地文件，支持 CORS 与 fetch。
 - 任务引擎与通知
@@ -123,40 +144,56 @@ DBF --> P
 - 状态管理
   - useTaskStore 订阅 TaskEngine 事件，刷新任务列表并计算活跃任务数，供 UI 展示。
 
+**更新** 新增了REST API服务器和HTTP后端组件，支持浏览器模式下的SQLite访问。
+
 **章节来源**
 - [main.cjs:68-126](file://app/electron/main.cjs#L68-L126)
 - [preload.cjs:1-82](file://app/electron/preload.cjs#L1-L82)
 - [database/index.cjs:1-93](file://app/electron/database/index.cjs#L1-L93)
-- [database.js:1-98](file://app/src/db/database.js#L1-L98)
+- [database/queries.cjs:1-721](file://app/electron/database/queries.cjs#L1-L721)
+- [database.js:1-114](file://app/src/db/database.js#L1-L114)
+- [http-backend.js:1-345](file://app/src/db/http-backend.js#L1-L345)
 - [file-manager.cjs:1-196](file://app/electron/file-manager.cjs#L1-L196)
-- [api-server.cjs:1-250](file://app/electron/api-server.cjs#L1-L250)
+- [api-server.cjs:1-606](file://app/electron/api-server.cjs#L1-L606)
 - [protocol.cjs:1-93](file://app/electron/protocol.cjs#L1-L93)
 - [task-engine.js:1-319](file://app/src/services/task-engine.js#L1-L319)
 - [useTaskStore.js:1-173](file://app/src/stores/useTaskStore.js#L1-L173)
 - [notification.js:1-113](file://app/src/services/notification.js#L1-L113)
 
 ## 架构总览
-整体采用“主进程能力 + 渲染进程 UI”的分层架构：
-- 渲染进程通过预加载桥接访问主进程能力（数据库、文件、OSS、应用信息）。
-- 主进程集中管理资源（SQLite、文件系统、HTTP 代理、协议），保证安全与一致性。
+整体采用"主进程能力 + 渲染进程 UI"的分层架构，新增REST API层支持跨进程通信：
+- 渲染进程通过预加载桥接访问主进程能力（数据库、文件、OSS、应用信息），或通过HTTP API访问SQLite。
+- 主进程集中管理资源（SQLite、文件系统、REST API、HTTP代理、协议），保证安全与一致性。
+- REST API服务器提供标准化的数据库操作接口，支持浏览器模式下的数据访问。
 - 任务引擎在渲染进程运行，持久化任务状态到数据库，并通过事件驱动更新 UI。
 
 ```mermaid
 sequenceDiagram
 participant UI as "渲染进程<br/>App.jsx"
 participant Bridge as "预加载桥接<br/>preload.cjs"
+participant HTTPB as "HTTP后端<br/>http-backend.js"
 participant Main as "主进程<br/>main.cjs"
-participant IPC as "IPC 处理器<br/>ipc-handlers.cjs"
+participant API as "REST API服务器<br/>api-server.cjs"
+participant DBQ as "数据库查询层<br/>database/queries.cjs"
 participant DB as "SQLite(sql.js)<br/>database/index.cjs"
 participant FS as "文件管理器<br/>file-manager.cjs"
-participant API as "API 代理<br/>api-server.cjs"
 participant Proto as "自定义协议<br/>protocol.cjs"
+Note over UI,Proto : 浏览器模式：通过HTTP访问SQLite
+UI->>HTTPB : 调用 database.addImage(...)
+HTTPB->>API : POST /api/db/images/add
+API->>DBQ : queries.addImage()
+DBQ->>DB : INSERT INTO images
+DB-->>DBQ : 返回新ID
+DBQ-->>API : 返回结果
+API-->>HTTPB : JSON响应
+HTTPB-->>UI : 解析并返回数据
+Note over UI,Proto : Electron模式：通过IPC访问SQLite
 UI->>Bridge : 调用 electronAPI.db.getImages(...)
 Bridge->>Main : ipcRenderer.invoke('db : images : list', opts)
-Main->>IPC : 分发到 'db : images : list'
-IPC->>DB : 执行 SQL 查询
-DB-->>IPC : 返回结果
-IPC-->>Main : 返回数据
+Main->>DBQ : 执行数据库查询
+DBQ->>DB : 执行 SQL 查询
+DB-->>DBQ : 返回结果
+DBQ-->>Main : 返回数据
 Main-->>Bridge : 返回 Promise 结果
 Bridge-->>UI : 解析并返回数据
 Note over UI,Proto : 图片资源可通过 app : // 协议直接访问本地文件
@@ -169,11 +206,12 @@ Proto-->>UI : 返回图片响应
 **图表来源** 
 - [App.jsx:1-364](file://app/src/App.jsx#L1-L364)
 - [preload.cjs:1-82](file://app/electron/preload.cjs#L1-L82)
+- [http-backend.js:1-345](file://app/src/db/http-backend.js#L1-L345)
 - [main.cjs:1-126](file://app/electron/main.cjs#L1-L126)
-- [ipc-handlers.cjs:1-63](file://app/electron/ipc-handlers.cjs#L1-L63)
+- [api-server.cjs:1-606](file://app/electron/api-server.cjs#L1-L606)
+- [database/queries.cjs:1-721](file://app/electron/database/queries.cjs#L1-L721)
 - [database/index.cjs:1-93](file://app/electron/database/index.cjs#L1-L93)
 - [file-manager.cjs:1-196](file://app/electron/file-manager.cjs#L1-L196)
-- [api-server.cjs:1-250](file://app/electron/api-server.cjs#L1-L250)
 - [protocol.cjs:1-93](file://app/electron/protocol.cjs#L1-L93)
 
 ## 详细组件分析
@@ -185,12 +223,13 @@ Proto-->>UI : 返回图片响应
   - 注册 IPC handlers（数据库、OSS）
   - 初始化 FileManager 并注册文件操作 IPC
   - 注册 app:// 协议
-  - 启动 API 代理服务器并暴露端口
+  - 启动 REST API 服务器并暴露端口
   - 初始化 OSS 增量同步与网络恢复重试
   - 创建主窗口，监听首次加载与 SPA 导航，触发 IndexedDB → SQLite 迁移
 - 设计要点
   - 使用 did-finish-load 与 lastUrl 区分首次加载与后续导航，避免重复迁移
   - before-quit 时停止 OSS 同步并关闭数据库，确保数据落盘
+  - 开发环境固定端口19527，生产环境随机端口
 
 ```mermaid
 flowchart TD
@@ -200,7 +239,7 @@ Ready --> InitDB["初始化 SQLite 与 Schema"]
 InitDB --> RegIPC["注册 IPC 处理器"]
 RegIPC --> InitFM["初始化 FileManager 并注册文件 IPC"]
 InitFM --> RegProto["注册 app:// 协议"]
-RegProto --> StartAPI["启动 API 代理服务器"]
+RegProto --> StartAPI["启动 REST API 服务器"]
 StartAPI --> InitOss["初始化 OSS 同步与网络恢复"]
 InitOss --> CreateWin["创建主窗口"]
 CreateWin --> LoadPage{"页面首次加载?"}
@@ -258,32 +297,129 @@ Preload --> MainIPC : "ipcRenderer.invoke"
 - [preload.cjs:1-82](file://app/electron/preload.cjs#L1-L82)
 - [ipc-handlers.cjs:1-63](file://app/electron/ipc-handlers.cjs#L1-L63)
 
-### 数据库层（策略门面 + sql.js）
+### 数据库层（策略门面 + 多后端支持）
 - 渲染进程策略门面
-  - initDatabase 自动检测 window.electronAPI?.db 是否存在，选择 Electron 后端（IPC）或 Dexie 后端（IndexedDB）
+  - initDatabase 自动检测运行环境，选择最优后端：
+    - Electron IPC 后端（优先）：直接访问主进程SQLite
+    - HTTP 后端（次优）：通过REST API访问SQLite
+    - Dexie 后端（降级）：使用IndexedDB
   - 对外导出统一函数集合，Zustand 与页面无需感知差异
 - 主进程 SQLite
   - 使用 sql.js 在内存中运行 SQLite，WAL 模式尝试开启
   - 每次写操作后 300ms 节流写入磁盘，关闭时强制落盘
   - 启动时执行 schema DDL，确保表结构存在
 
+**更新** 新增HTTP后端支持，允许浏览器模式访问SQLite数据库。
+
 ```mermaid
 flowchart TD
 Boot["渲染进程启动"] --> Detect{"是否 Electron?"}
 Detect --> |是| UseIPC["创建 Electron 后端(基于 IPC)"]
-Detect --> |否| UseDexie["创建 Dexie 后端(IndexedDB)"]
+Detect --> |否| TryHTTP["尝试 HTTP 后端"]
+TryHTTP --> HTTPCheck{"HTTP API可用?"}
+HTTPCheck --> |是| UseHTTP["创建 HTTP 后端"]
+HTTPCheck --> |否| UseDexie["创建 Dexie 后端(IndexedDB)"]
 UseIPC --> Open["打开后端(open)"]
+UseHTTP --> Open
 UseDexie --> Open
 Open --> Ready["门面可用(db.*)"]
 ```
 
 **图表来源** 
-- [database.js:1-98](file://app/src/db/database.js#L1-L98)
+- [database.js:1-114](file://app/src/db/database.js#L1-L114)
 - [database/index.cjs:1-93](file://app/electron/database/index.cjs#L1-L93)
 
 **章节来源**
-- [database.js:1-98](file://app/src/db/database.js#L1-L98)
+- [database.js:1-114](file://app/src/db/database.js#L1-L114)
 - [database/index.cjs:1-93](file://app/electron/database/index.cjs#L1-L93)
+
+### REST API 服务器
+- 路由架构
+  - `/api/db/*` → SQLite数据库REST API（25+端点）
+  - `/api/qwen/*` → Qwen DashScope API代理
+  - `/api/evolink/*` → EvoLink API代理
+  - `/api/oss/*` → 阿里云OSS代理
+  - `/api/llm/*` → Expansion LLM代理
+  - `/api/proxy-image` → 外部图片CORS代理
+- 数据库API端点
+  - Images: add/update/delete/list/search/stats/toggleFavorite/move
+  - Batches: add/list
+  - Sessions: add/list
+  - Folders: add/list/update/delete
+  - Tasks: add/update/list/delete/stats
+  - Settings: getAll/set/get
+  - CasePackages: add/list/update/delete
+- 特性
+  - 从 .env 读取密钥与基础地址
+  - 统一代理逻辑：读取请求体、拼接目标 URL、注入额外头、回写状态码与响应头、返回 body
+  - 错误处理：502 代理错误、404 未匹配、参数校验失败
+  - 二进制文件上传/下载支持（图片文件、缩略图）
+
+**新增** 完整的REST API服务器，提供标准化的数据库访问接口。
+
+```mermaid
+sequenceDiagram
+participant Client as "客户端"
+participant Server as "REST API服务器"
+participant Queries as "数据库查询层"
+participant DB as "SQLite"
+participant FS as "文件管理器"
+Note over Client,Server : 数据库操作示例
+Client->>Server : POST /api/db/images/add
+Server->>Queries : queries.addImage(body)
+Queries->>DB : INSERT INTO images
+DB-->>Queries : 返回新ID
+Queries-->>Server : 返回{ id }
+Server-->>Client : JSON响应
+Note over Client,Server : 文件上传示例
+Client->>Server : PUT /api/db/images/file/ : id (binary)
+Server->>FS : fileManager.saveImage(id, buffer, mime)
+FS-->>Server : 完成
+Server-->>Client : { ok : true, size }
+```
+
+**图表来源** 
+- [api-server.cjs:182-458](file://app/electron/api-server.cjs#L182-L458)
+- [database/queries.cjs:122-318](file://app/electron/database/queries.cjs#L122-L318)
+
+**章节来源**
+- [api-server.cjs:1-606](file://app/electron/api-server.cjs#L1-L606)
+- [database/queries.cjs:1-721](file://app/electron/database/queries.cjs#L1-L721)
+
+### HTTP 后端（浏览器模式）
+- 设计目标
+  - 在浏览器环境中通过HTTP访问Electron主进程的SQLite数据库
+  - 保持与Electron IPC后端相同的API接口
+  - 支持二进制文件的两步上传机制
+- 实现方式
+  - 所有数据库操作通过fetch调用/api/db/*端点
+  - 二进制文件分两步：先POST元数据获取ID，再PUT原始二进制数据
+  - 自动处理Blob转换和URL对象创建
+- 兼容性
+  - 完全兼容现有的数据库策略门面
+  - 无需修改现有业务代码即可切换后端
+
+**新增** 浏览器模式下的SQLite访问支持。
+
+```mermaid
+flowchart TD
+AddImage["addImage(image)"] --> Extract["提取imageBlob和thumbnailBlob"]
+Extract --> Step1["POST /api/db/images/add (元数据)"]
+Step1 --> GetID["获取返回的id"]
+GetID --> CheckBlob{"有imageBlob?"}
+CheckBlob --> |是| UploadFile["PUT /api/db/images/file/:id (二进制)"]
+CheckBlob --> |否| CheckThumb{"有thumbnailBlob?"}
+UploadFile --> CheckThumb
+CheckThumb --> |是| UploadThumb["PUT /api/db/images/thumbnail/:id (二进制)"]
+CheckThumb --> |否| ReturnID["返回id"]
+UploadThumb --> ReturnID
+```
+
+**图表来源** 
+- [http-backend.js:86-103](file://app/src/db/http-backend.js#L86-L103)
+
+**章节来源**
+- [http-backend.js:1-345](file://app/src/db/http-backend.js#L1-L345)
 
 ### 文件系统层（FileManager）
 - 目录组织
@@ -320,36 +456,6 @@ class FileManager {
 
 **章节来源**
 - [file-manager.cjs:1-196](file://app/electron/file-manager.cjs#L1-L196)
-
-### API 代理服务器
-- 路由
-  - /api/qwen/* → Qwen DashScope
-  - /api/evolink/* → EvoLink（GPT-image-2、Nano Banana 2）
-  - /api/oss/* → 阿里云 OSS
-  - /api/llm/* → Expansion LLM
-  - /api/proxy-image → 外部图片 CORS 代理
-- 特性
-  - 从 .env 读取密钥与基础地址
-  - 统一代理逻辑：读取请求体、拼接目标 URL、注入额外头、回写状态码与响应头、返回 body
-  - 错误处理：502 代理错误、404 未匹配、参数校验失败
-
-```mermaid
-sequenceDiagram
-participant Client as "客户端"
-participant Server as "API 代理"
-participant Upstream as "上游服务"
-Client->>Server : POST /api/qwen/chat/completions
-Server->>Server : 读取请求体/拼接目标URL/注入Authorization
-Server->>Upstream : 转发请求
-Upstream-->>Server : 返回响应
-Server-->>Client : 透传状态码/响应头/body
-```
-
-**图表来源** 
-- [api-server.cjs:145-228](file://app/electron/api-server.cjs#L145-L228)
-
-**章节来源**
-- [api-server.cjs:1-250](file://app/electron/api-server.cjs#L1-L250)
 
 ### 自定义协议（app://）
 - 特权 scheme 注册
@@ -446,6 +552,7 @@ MainContent --> MaskEditor["MaskEditor"]
   - preload.cjs 作为唯一桥接点，降低渲染进程对主进程的耦合面
   - database.js 策略门面屏蔽后端差异，提升可移植性
   - task-engine.js 与 useTaskStore.js 通过事件解耦，便于扩展
+  - api-server.cjs 提供统一的REST API接口，支持多种后端
 - 外部依赖
   - sql.js（SQLite in-memory）
   - ali-oss（OSS 同步）
@@ -455,16 +562,21 @@ MainContent --> MaskEditor["MaskEditor"]
   - react-router-dom（路由）
   - vite + electron-builder（构建与打包）
 
+**更新** 新增REST API服务器和HTTP后端的依赖关系。
+
 ```mermaid
 graph TB
 Main["main.cjs"] --> DBI["database/index.cjs"]
+Main --> DBQ["database/queries.cjs"]
 Main --> FM["file-manager.cjs"]
 Main --> API["api-server.cjs"]
 Main --> PR["protocol.cjs"]
 Main --> IPC["ipc-handlers.cjs"]
-IPC --> DBI
+IPC --> DBQ
 Pre["preload.cjs"] --> IPC
 DBF["db/database.js"] --> Pre
+DBF --> HTTPB["db/http-backend.js"]
+HTTPB --> API
 TE["services/task-engine.js"] --> DBF
 TS["stores/useTaskStore.js"] --> TE
 ```
@@ -474,7 +586,9 @@ TS["stores/useTaskStore.js"] --> TE
 - [preload.cjs:1-82](file://app/electron/preload.cjs#L1-L82)
 - [ipc-handlers.cjs:1-63](file://app/electron/ipc-handlers.cjs#L1-L63)
 - [database/index.cjs:1-93](file://app/electron/database/index.cjs#L1-L93)
-- [database.js:1-98](file://app/src/db/database.js#L1-L98)
+- [database/queries.cjs:1-721](file://app/electron/database/queries.cjs#L1-L721)
+- [database.js:1-114](file://app/src/db/database.js#L1-L114)
+- [http-backend.js:1-345](file://app/src/db/http-backend.js#L1-L345)
 - [task-engine.js:1-319](file://app/src/services/task-engine.js#L1-L319)
 - [useTaskStore.js:1-173](file://app/src/stores/useTaskStore.js#L1-L173)
 
@@ -490,40 +604,53 @@ TS["stores/useTaskStore.js"] --> TE
   - app:// 协议返回 Cache-Control，缩短二次加载时间
 - 代理优化
   - 统一代理逻辑复用，减少重复代码；按需注入头部，避免多余开销
+- REST API优化
+  - 二进制文件分块传输，避免大文件内存溢出
+  - HTTP连接复用，减少TCP握手开销
 
-[本节为通用指导，不直接分析具体文件]
+**更新** 新增REST API服务器的性能优化考虑。
 
 ## 故障排查指南
 - 数据库初始化失败
   - 检查 userData 路径与文件权限；确认 schema DDL 执行成功
   - 关注 closeDatabase 是否在退出前被调用，防止数据丢失
-- API 代理 502/404
+- REST API 502/404
   - 检查 .env 变量是否正确；确认上游服务可达；查看日志中的 targetUrl 与 headers
+  - 确认/api/db端点是否正确路由到数据库查询层
+- HTTP后端连接失败
+  - 确认Electron主进程已启动且API服务器正在监听
+  - 检查Vite代理配置是否正确指向19527端口
 - app:// 协议 404
   - 确认图片 ID 与扩展名正确；检查路径遍历拦截与文件是否存在
 - 任务无法完成
   - 查看任务状态与错误信息；确认重试次数与退避策略；检查网络错误分类逻辑
 
+**更新** 新增REST API和HTTP后端的故障排查指南。
+
 **章节来源**
 - [database/index.cjs:66-93](file://app/electron/database/index.cjs#L66-L93)
 - [api-server.cjs:109-128](file://app/electron/api-server.cjs#L109-L128)
+- [database.js:32-44](file://app/src/db/database.js#L32-L44)
 - [protocol.cjs:48-68](file://app/electron/protocol.cjs#L48-L68)
 - [task-engine.js:259-305](file://app/src/services/task-engine.js#L259-L305)
 
 ## 结论
-该架构以主进程为中心，集中管理敏感资源与外部服务，渲染进程专注于 UI 与交互。通过预加载桥接与策略门面，既保证了安全性，又提升了跨环境兼容性。任务引擎与通知机制增强了用户体验，API 代理简化了多模型接入。整体设计清晰、可扩展性强，适合持续迭代与功能扩展。
+该架构以主进程为中心，集中管理敏感资源与外部服务，渲染进程专注于 UI 与交互。通过预加载桥接与策略门面，既保证了安全性，又提升了跨环境兼容性。新增的REST API服务器提供了标准化的数据库访问接口，支持浏览器模式下的SQLite访问。任务引擎与通知机制增强了用户体验，API 代理简化了多模型接入。整体设计清晰、可扩展性强，适合持续迭代与功能扩展。
 
-[本节为总结性内容，不直接分析具体文件]
+**更新** 新增的REST API服务器和HTTP后端显著提升了应用的灵活性和可移植性。
 
 ## 附录
 - 开发脚本
-  - dev：并行启动 Vite 与 Electron
+  - dev：并行启动 Vite 与 Electron，自动启动REST API服务器
   - build：生产构建
   - electron:build：打包 Windows 应用
 - 构建配置
   - base 设置为相对路径，适配 Electron 本地加载
   - 启用 api-proxy 插件用于开发期代理
+  - Vite代理配置：/api/db → http://127.0.0.1:19527
+
+**更新** 新增REST API服务器的开发配置说明。
 
 **章节来源**
 - [package.json:9-17](file://app/package.json#L9-L17)
-- [vite.config.js:1-14](file://app/vite.config.js#L1-L14)
+- [vite.config.js:1-20](file://app/vite.config.js#L1-L20)

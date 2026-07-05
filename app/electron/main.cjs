@@ -21,7 +21,7 @@ let lastUrl = null;
 /** @type {boolean} IndexedDB → SQLite 迁移是否已执行 */
 let migrationDone = false;
 
-function createWindow(getDbRef, fileManagerRef) {
+function createWindow(getDbRef, fileManagerRef, port) {
   const mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -52,6 +52,10 @@ function createWindow(getDbRef, fileManagerRef) {
     if (!migrationDone) {
       migrationDone = true;
       runMigration(mainWindow, getDbRef, fileManagerRef);
+    }
+    // Inject API port for proxyImageUrl in production mode
+    if (port) {
+      mainWindow.webContents.executeJavaScript(`window.__electronApiPort = ${port};`);
     }
   });
 
@@ -108,10 +112,10 @@ app.whenReady().then(async () => {
   powerMonitor.on('resume', onNetworkResume);
 
   // 9. 创建主窗口
-  const mainWindow = createWindow(getDb, fileManager);
+  const mainWindow = createWindow(getDb, fileManager, apiServerPort);
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow(getDb, fileManager);
+    if (BrowserWindow.getAllWindows().length === 0) createWindow(getDb, fileManager, apiServerPort);
   });
 });
 
