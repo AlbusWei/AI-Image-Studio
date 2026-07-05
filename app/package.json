@@ -19,14 +19,15 @@
   "dependencies": {
     "ali-oss": "^6.23.0",
     "axios": "^1.18.1",
+    "commander": "^15.0.0",
     "dexie": "^4.4.4",
+    "dotenv": "^17.4.2",
     "immer": "^11.1.11",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hotkeys-hook": "^5.3.3",
     "react-router-dom": "^6.28.0",
-    "dotenv": "^17.4.2",
     "sql.js": "^1.14.1",
     "uuid": "^14.0.1",
     "zustand": "^5.0.14"
