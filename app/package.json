@@ -2,11 +2,16 @@
   "name": "ai-image-studio",
   "private": true,
   "version": "0.1.0",
+  "description": "AI Image Studio - Desktop application for AI image generation",
+  "author": "AI Image Studio Team",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "electron:build": "vite build && electron-builder --win --config electron-builder.yml"
   },
   "dependencies": {
     "ali-oss": "^6.23.0",
@@ -18,12 +23,17 @@
     "react-dom": "^18.3.1",
     "react-hotkeys-hook": "^5.3.3",
     "react-router-dom": "^6.28.0",
+    "dotenv": "^17.4.2",
+    "sql.js": "^1.14.1",
     "uuid": "^14.0.1",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
-    "dotenv": "^17.4.2",
-    "vite": "^6.0.0"
+    "concurrently": "^10.0.3",
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3",
+    "vite": "^6.0.0",
+    "wait-on": "^9.0.10"
   }
 }

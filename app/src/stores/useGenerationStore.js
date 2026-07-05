@@ -18,6 +18,7 @@ import { MODELS } from '../constants/models';
 import { getModelAdapter, getLLMAdapter } from '../services/api';
 import TaskEngine from '../services/task-engine';
 import { addBatch, addImage, updateImage } from '../db/database';
+import { StorageService } from '../services/storage';
 
 /**
  * Convert a blob:// URL to a data: URL (base64) so it can be sent to external APIs.
@@ -215,30 +216,90 @@ export const useGenerationStore = create((set, get) => ({
         // result = { images: [{ url }, ...] }
         const images = result.images || [];
 
-        // Persist each image to DB (update pending record if exists, otherwise insert new)
+        // Persist each image: download blob + thumbnail + store in IndexedDB
         const resultImages = [];
         for (let i = 0; i < images.length; i++) {
           const img = images[i];
-          let imgId;
+          const imgPrompt = typeof prompt === 'string' ? prompt : JSON.stringify(prompt);
 
-          if (i === 0 && pendingImageId) {
-            // Update the pending record with the actual result
+          try {
+            // StorageService.saveImage downloads the blob, generates a thumbnail,
+            // and stores both the Blob objects and blob URLs in IndexedDB.
+            // If this is the first image and we have a pending record, update it.
+            const existingId = (i === 0 && pendingImageId) ? pendingImageId : undefined;
+            const { localId } = await StorageService.saveImage(img.url, {
+              existingId,
+              batchId,
+              folderId: null,
+              model: currentModel,
+              prompt: imgPrompt,
+              params: { ...params },
+              favorite: false,
+              status: 'completed',
+              width: img.width,
+              height: img.height,
+              sourceUrl: img.url,  // keep remote URL as backup
+              storageZone: 'hot',
+            });
+
+            // Try optional OSS upload (best-effort, non-blocking)
             try {
-              await updateImage(pendingImageId, {
-                url: img.url,
-                thumbnailUrl: img.url,
-                status: 'completed',
-                width: img.width,
-                height: img.height,
-              });
-              imgId = pendingImageId;
-            } catch (dbErr) {
-              console.warn('[GenerationStore] Failed to update pending image, inserting new:', dbErr);
+              const blob = await StorageService.getImage(localId);
+              if (blob) {
+                const ossKey = `images/${localId}/${Date.now()}.png`;
+                const ossUrl = await StorageService.uploadToOSS(blob, ossKey);
+                if (ossUrl) {
+                  await updateImage(localId, { ossUrl, ossKey });
+                  console.log('[GenerationStore] OSS upload success:', ossUrl);
+                }
+              }
+            } catch (ossErr) {
+              console.warn('[GenerationStore] OSS upload skipped (non-critical):', ossErr.message);
+            }
+
+            resultImages.push({
+              id: localId,
+              url: img.url,
+              prompt: imgPrompt,
+              params: { ...params },
+            });
+          } catch (saveErr) {
+            console.warn('[GenerationStore] saveImage failed, fallback to URL-only:', saveErr);
+            // Fallback: save remote URL only (old behavior)
+            let imgId;
+            if (i === 0 && pendingImageId) {
+              try {
+                await updateImage(pendingImageId, {
+                  url: img.url,
+                  thumbnailUrl: img.url,
+                  status: 'completed',
+                  width: img.width,
+                  height: img.height,
+                });
+                imgId = pendingImageId;
+              } catch (dbErr) {
+                imgId = await addImage({
+                  batchId,
+                  folderId: null,
+                  model: currentModel,
+                  prompt: imgPrompt,
+                  url: img.url,
+                  thumbnailUrl: img.url,
+                  params: { ...params },
+                  favorite: false,
+                  storageZone: 'hot',
+                  status: 'completed',
+                  createdAt: Date.now(),
+                  width: img.width,
+                  height: img.height,
+                });
+              }
+            } else {
               imgId = await addImage({
                 batchId,
                 folderId: null,
                 model: currentModel,
-                prompt,
+                prompt: imgPrompt,
                 url: img.url,
                 thumbnailUrl: img.url,
                 params: { ...params },
@@ -250,30 +311,13 @@ export const useGenerationStore = create((set, get) => ({
                 height: img.height,
               });
             }
-          } else {
-            imgId = await addImage({
-              batchId,
-              folderId: null,
-              model: currentModel,
-              prompt,
+            resultImages.push({
+              id: imgId,
               url: img.url,
-              thumbnailUrl: img.url,
+              prompt: imgPrompt,
               params: { ...params },
-              favorite: false,
-              storageZone: 'hot',
-              status: 'completed',
-              createdAt: Date.now(),
-              width: img.width,
-              height: img.height,
             });
           }
-
-          resultImages.push({
-            id: imgId,
-            url: img.url,
-            prompt,
-            params: { ...params },
-          });
         }
 
         return { images: resultImages, batchId };

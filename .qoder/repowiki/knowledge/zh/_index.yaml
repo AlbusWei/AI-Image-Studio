@@ -1,0 +1,105 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: zh-CN
+branch: master
+nodes_managed: true
+exported_at: "2026-07-05T13:44:32Z"
+modules:
+    "":
+        dir_name: AI 图像工作室项目根（文档与验收证据）
+        title: AI 图像工作室项目根（文档与验收证据）
+        scope:
+            - README.md
+            - .gitignore
+            - docs/
+            - ai-image-studio-summary.canvas.status.json
+            - ai-image-studio-summary.canvas.tsx
+            - image studio.code-workspace
+            - e2e-final-test1-fullpage.png
+            - e2e-final-test1-lightbox.png
+            - e2e-final-test1-qwen-generated.png
+            - e2e-final-test1-qwen-result.png
+            - e2e-final-test2-gpt-result.png
+            - e2e-final-test3-filtered.png
+            - e2e-final-test3-gallery.png
+            - e2e-final-test3-search.png
+            - e2e-final-test4-settings.png
+            - e2e-final-test5-task-center.png
+            - e2e-final-test6-knowledge-base.png
+            - e2e-final-workbench-initial.png
+            - e2e-fix-verify-test1-context-menu.png
+            - e2e-fix-verify-test1-mask-editor-fullselect.png
+            - e2e-fix-verify-test1-mask-editor.png
+            - e2e-fix-verify-test2-gallery-context-menu.png
+            - e2e-fix-verify-test2-ref-image-result.png
+            - e2e-fix-verify-test3-fine-tune-prompt.png
+            - e2e-fix-verify-test4-knowledge-base-empty.png
+            - e2e-fix-verify-test4-lightbox-knowledge-base.png
+            - e2e-fix-verify-test4-lightbox-move-to.png
+            - e2e-fix-verify-test4-lightbox-qwen.png
+            - e2e-test-1-initial-load.png
+            - e2e-test-1-page-load.png
+            - e2e-test-2-api-test.png
+            - e2e-test-2-gallery.png
+            - e2e-test-2-knowledge-base.png
+            - e2e-test-2-settings-api-tab.png
+            - e2e-test-2-settings-general-tab.png
+            - e2e-test-2-settings-prompt-tab.png
+            - e2e-test-2-settings-storage-tab.png
+            - e2e-test-2-task-center.png
+            - e2e-test-3-workbench-after-generate.png
+            - e2e-test-3-workbench-gpt-model.png
+            - e2e-test-3-workbench-prompt.png
+            - e2e-test-4-gallery-view-toggled.png
+            - e2e-test-4-gallery.png
+            - e2e-test-api-step1-initial.png
+            - e2e-test-api-step2-gpt-result.png
+            - e2e-test-api-step3-nano-result.png
+            - e2e-test-api-test-page.png
+            - e2e-test-gallery-current.png
+            - e2e-test-gallery-empty.png
+            - e2e-test-gallery-favorite.png
+            - e2e-test-gallery-favorites-filter.png
+            - e2e-test-gallery.png
+            - e2e-test-gpt-fail.png
+            - e2e-test-gpt-image-2-pass.png
+            - e2e-test-gpt-image-2-result.png
+            - e2e-test-gpt-result.png
+            - e2e-test-llm-expansion-result.png
+            - e2e-test-llm-fail.png
+            - e2e-test-llm-result.png
+            - e2e-test-nano-banana-2-fail.png
+            - e2e-test-nano-banana-2-latest.png
+            - e2e-test-nano-banana-result.png
+            - e2e-test-qwen-pass.png
+            - e2e-test-qwen-result.png
+            - e2e-test-settings-blank.png
+            - e2e-test-workbench-before-generate.png
+            - e2e-test-workbench-full.png
+            - e2e-test-workbench-generate-failed.png
+            - e2e-test-workbench-state.png
+            - e2e-test-workbench-success.png
+            - e2e-verify-final-1-after-knowledge.png
+            - e2e-verify-final-1-lightbox.png
+            - e2e-verify-final-2-knowledge-base.png
+            - e2e-verify-test1-page-load.png
+            - e2e-verify-test2-context-menu.png
+            - e2e-verify-test2-generated.png
+            - e2e-verify-test3-gallery-context-menu.png
+            - e2e-verify-test3-ref-image.png
+            - e2e-verify-test4-settings.png
+            - e2e-verify-test5-task-center.png
+        source_files: []
+        children:
+            - app
+        depends_on: []
+        related_to: []
+    app:
+        dir_name: AI 图像工作室前端应用（React + Vite）
+        title: AI 图像工作室前端应用（React + Vite）
+        scope:
+            - app/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []

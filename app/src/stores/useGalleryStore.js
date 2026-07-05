@@ -54,6 +54,26 @@ export const useGalleryStore = create((set, get) => ({
         );
       }
 
+      // Recreate blob URLs from stored blobs (handles page-refresh stale blob URLs)
+      images = images.map((img) => {
+        if (img.imageBlob instanceof Blob) {
+          try {
+            const freshBlobUrl = URL.createObjectURL(img.imageBlob);
+            img.blobUrl = freshBlobUrl;
+            // Also update the DB record with fresh blobUrl for this session
+            db.updateImage(img.id, { blobUrl: freshBlobUrl }).catch(() => {});
+          } catch { /* best effort */ }
+        }
+        if (img.thumbnailBlob instanceof Blob) {
+          try {
+            const freshThumbUrl = URL.createObjectURL(img.thumbnailBlob);
+            img.thumbnailUrl = freshThumbUrl;
+            db.updateImage(img.id, { thumbnailUrl: freshThumbUrl }).catch(() => {});
+          } catch { /* best effort */ }
+        }
+        return img;
+      });
+
       set({ images, isLoading: false });
     } catch (err) {
       console.error('[GalleryStore] loadImages error:', err);

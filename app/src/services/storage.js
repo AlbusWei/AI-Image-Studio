@@ -47,9 +47,12 @@ class StorageServiceClass {
    * Save an image to local IndexedDB (hot zone).
    * @param {Blob|string} imageData - Blob or URL to fetch
    * @param {Object} metadata - { model, prompt, params, width, height, ... }
+   *   metadata.existingId - if provided, update this existing record instead of creating new
    * @returns {Promise<{ localId: number, thumbnailBlob: Blob }>}
    */
   async saveImage(imageData, metadata = {}) {
+    const { existingId, ...restMeta } = metadata;
+
     // Resolve blob from URL if needed
     let blob;
     if (typeof imageData === 'string') {
@@ -63,20 +66,36 @@ class StorageServiceClass {
     // Generate thumbnail
     const thumbnailBlob = await this._generateThumbnail(blob);
 
-    // Store in IndexedDB
-    const id = await db.addImage({
-      ...metadata,
-      storageZone: 'hot',
-      createdAt: Date.now(),
-    });
+    // Create runtime blob URLs for immediate display
+    const blobUrl = URL.createObjectURL(blob);
+    const thumbnailUrl = thumbnailBlob ? URL.createObjectURL(thumbnailBlob) : null;
 
-    // Store blobs in a separate object store or attach to image record
-    // For simplicity, we store blob URLs in memory and the blob reference in DB
-    await db.updateImage(id, {
-      blobUrl: URL.createObjectURL(blob),
-      thumbnailUrl: thumbnailBlob ? URL.createObjectURL(thumbnailBlob) : null,
-      blobSize: blob.size,
-    });
+    let id;
+    if (existingId) {
+      // Update existing record (e.g. pending task record from generate flow)
+      id = existingId;
+      await db.updateImage(id, {
+        ...restMeta,
+        blobUrl,
+        thumbnailUrl,
+        blobSize: blob.size,
+        imageBlob: blob,
+        thumbnailBlob,
+        status: restMeta.status || 'completed',
+      });
+    } else {
+      // Insert new record
+      id = await db.addImage({
+        ...restMeta,
+        storageZone: 'hot',
+        blobUrl,
+        thumbnailUrl,
+        blobSize: blob.size,
+        imageBlob: blob,
+        thumbnailBlob,
+        createdAt: Date.now(),
+      });
+    }
 
     return { localId: id, thumbnailBlob };
   }
@@ -90,24 +109,37 @@ class StorageServiceClass {
     const record = await db.getImage(id);
     if (!record) return null;
 
-    // Try blobUrl first (already downloaded)
+    // Try blobUrl first (fastest, same-session only)
     if (record.blobUrl) {
       try {
         const resp = await fetch(record.blobUrl);
         return await resp.blob();
-      } catch { /* fall through */ }
+      } catch { /* blobUrl stale (page refresh), fall through */ }
+    }
+
+    // Try stored imageBlob (survives page refresh)
+    if (record.imageBlob instanceof Blob) {
+      // Refresh the blobUrl for subsequent accesses
+      const freshBlobUrl = URL.createObjectURL(record.imageBlob);
+      await db.updateImage(id, { blobUrl: freshBlobUrl });
+      return record.imageBlob;
     }
 
     // Fallback: fetch the original URL through the CORS proxy and cache the blob
-    if (record.url && (record.url.startsWith('http://') || record.url.startsWith('https://'))) {
+    const remoteUrl = record.sourceUrl || record.url;
+    if (remoteUrl && (remoteUrl.startsWith('http://') || remoteUrl.startsWith('https://'))) {
       try {
-        const proxyUrl = proxyImageUrl(record.url);
+        const proxyUrl = proxyImageUrl(remoteUrl);
         const resp = await fetch(proxyUrl);
         if (resp.ok) {
           const blob = await resp.blob();
-          // Cache the blob URL for subsequent accesses
+          // Cache both blob and blobUrl for subsequent accesses
           const cachedBlobUrl = URL.createObjectURL(blob);
-          await db.updateImage(id, { blobUrl: cachedBlobUrl, blobSize: blob.size });
+          await db.updateImage(id, {
+            blobUrl: cachedBlobUrl,
+            imageBlob: blob,
+            blobSize: blob.size,
+          });
           return blob;
         }
       } catch (err) {
@@ -125,14 +157,24 @@ class StorageServiceClass {
    */
   async getThumbnail(id) {
     const record = await db.getImage(id);
-    if (!record?.thumbnailUrl) return null;
+    if (!record) return null;
 
-    try {
-      const resp = await fetch(record.thumbnailUrl);
-      return await resp.blob();
-    } catch {
-      return null;
+    // Try stored thumbnailBlob first (survives page refresh)
+    if (record.thumbnailBlob instanceof Blob) {
+      return record.thumbnailBlob;
     }
+
+    // Fallback: try thumbnailUrl (same-session blob URL)
+    if (record.thumbnailUrl) {
+      try {
+        const resp = await fetch(record.thumbnailUrl);
+        return await resp.blob();
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
   }
 
   /**

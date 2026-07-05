@@ -9,7 +9,16 @@ import { useUIStore } from '../stores/useUIStore';
 import { useGalleryStore } from '../stores/useGalleryStore';
 import { updateImage, addCasePackage } from '../db/database';
 import StorageService from '../services/storage';
+import { proxyImageUrl } from '../services/api/client';
 
+function getImageDisplayUrl(img) {
+  if (!img) return '';
+  if (img.blobUrl) return img.blobUrl;
+  if (img.thumbnailUrl && img.thumbnailUrl.startsWith('blob:')) return img.thumbnailUrl;
+  const raw = img.url || '';
+  if (raw.startsWith('http://') || raw.startsWith('https://')) return proxyImageUrl(raw);
+  return raw;
+}
 function Lightbox({ isOpen, onClose, images = [], currentIndex = 0 }) {
   const [currentImageIndex, setCurrentImageIndex] = useState(currentIndex);
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -101,7 +110,7 @@ function Lightbox({ isOpen, onClose, images = [], currentIndex = 0 }) {
   // 局部重绘: open mask editor with current image
   const handleInpaint = useCallback(async () => {
     try {
-      const imageUrl = currentImage?.url || currentImage?.blobUrl;
+      const imageUrl = getImageDisplayUrl(currentImage);
       if (!imageUrl) {
         addToast('无法获取图片', { type: 'error' });
         return;
@@ -154,7 +163,7 @@ function Lightbox({ isOpen, onClose, images = [], currentIndex = 0 }) {
         params: currentImage.params || {},
         annotation: note || '',
         tags: currentImage.tags || [],
-        imageUrl: currentImage.url || currentImage.blobUrl || '',
+        imageUrl: getImageDisplayUrl(currentImage),
         createdAt: Date.now(),
       });
       addToast('已加入知识库', { type: 'success' });
@@ -291,17 +300,20 @@ function Lightbox({ isOpen, onClose, images = [], currentIndex = 0 }) {
               background: 'var(--bg-card)',
             }}
           >
-            {currentImage?.url ? (
-              <img
-                src={currentImage.url}
-                alt={currentImage.prompt || 'Generated image'}
-                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-              />
-            ) : (
-              <div className="ph-img" style={{ width: '100%', height: '100%' }}>
-                <span style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>暂无图片</span>
-              </div>
-            )}
+            {(() => {
+              const displayUrl = getImageDisplayUrl(currentImage);
+              return displayUrl ? (
+                <img
+                  src={displayUrl}
+                  alt={currentImage.prompt || 'Generated image'}
+                  style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                />
+              ) : (
+                <div className="ph-img" style={{ width: '100%', height: '100%' }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>暂无图片</span>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Right arrow */}

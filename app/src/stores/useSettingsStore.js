@@ -12,10 +12,27 @@ import * as db from '../db/database';
 
 /** Build default model configs from constants. */
 function buildDefaultModelConfigs() {
+  const envKeyMap = {
+    'qwen-image-3': {
+      apiKey: import.meta.env.VITE_QWEN_API_KEY || '',
+      endpoint: import.meta.env.VITE_QWEN_API_BASE || '',
+    },
+    'gpt-image-2': {
+      apiKey: import.meta.env.VITE_EVOLINK_API_KEY || '',
+      endpoint: import.meta.env.VITE_EVOLINK_API_BASE || '',
+    },
+    'nanobanana-2': {
+      apiKey: import.meta.env.VITE_EVOLINK_API_KEY || '',
+      endpoint: import.meta.env.VITE_EVOLINK_API_BASE || '',
+    },
+  };
   const configs = {};
   for (const [id, model] of Object.entries(MODELS)) {
+    const env = envKeyMap[id] || {};
     configs[id] = {
       enabled: true,
+      apiKey: env.apiKey || '',
+      endpoint: env.endpoint || '',
       defaultParams: { ...model.defaultParams },
     };
   }

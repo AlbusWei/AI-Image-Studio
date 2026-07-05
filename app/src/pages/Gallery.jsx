@@ -9,6 +9,7 @@ import {
 import { useGalleryStore } from '../stores/useGalleryStore'
 import { useUIStore } from '../stores/useUIStore'
 import { useGenerationStore } from '../stores/useGenerationStore'
+import { proxyImageUrl } from '../services/api/client'
 import * as db from '../db/database'
 
 const SEARCH_TYPES = [
@@ -24,7 +25,18 @@ const FILTER_CONFIG = [
   { key: 'fav', label: '收藏', options: [{ value: 'all', label: '全部' }, { value: 'only', label: '仅收藏' }] },
 ]
 
-function getImageDisplayUrl(img) { return img.thumbnailUrl || img.blobUrl || img.url || '' }
+function getImageDisplayUrl(img) {
+  // blob URLs are local memory URLs, use them first (fastest)
+  if (img.blobUrl) return img.blobUrl
+  // thumbnail blob URL
+  if (img.thumbnailUrl && img.thumbnailUrl.startsWith('blob:')) return img.thumbnailUrl
+  // For remote URLs (http/https), wrap with CORS proxy
+  const raw = img.thumbnailUrl || img.url || ''
+  if (raw.startsWith('http://') || raw.startsWith('https://')) {
+    return proxyImageUrl(raw)
+  }
+  return raw
+}
 function getAspectLabel(img) {
   if (!img.width || !img.height) return null
   const r = img.width / img.height

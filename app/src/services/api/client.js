@@ -13,6 +13,30 @@ const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
 
 /**
+ * Electron 环境检测 & API 端口解析。
+ * - 浏览器环境 (Vite dev / production)：baseURL = '/api'，由 Vite proxy 或 nginx 转发
+ * - Electron 环境：通过 IPC 获取 main 进程 API server 端口，动态改写 baseURL
+ */
+let _cachedApiBase = null;
+
+async function resolveApiBase() {
+  if (_cachedApiBase) return _cachedApiBase;
+  if (window.electronAPI?.getApiPort) {
+    try {
+      const port = await window.electronAPI.getApiPort();
+      if (port) {
+        _cachedApiBase = `http://127.0.0.1:${port}/api`;
+        return _cachedApiBase;
+      }
+    } catch (e) {
+      console.warn('[client] Failed to get Electron API port:', e);
+    }
+  }
+  _cachedApiBase = '/api';
+  return _cachedApiBase;
+}
+
+/**
  * Create the main axios instance.
  */
 const apiClient = axios.create({
@@ -37,9 +61,14 @@ export const longRunningClient = axios.create({
  */
 function applyInterceptors(instance, retryTarget) {
   instance.interceptors.request.use(
-    (config) => {
+    async (config) => {
       if (!config.signal) {
         config.signal = config._signal || undefined;
+      }
+      // Electron 环境：动态改写 baseURL 指向 main 进程 API server
+      const base = await resolveApiBase();
+      if (base !== '/api') {
+        config.baseURL = base;
       }
       return config;
     },
@@ -152,7 +181,9 @@ export function createCancellable() {
  */
 export function proxyImageUrl(url) {
   if (!url) return url;
-  if (url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('/api/proxy-image')) return url;
+  if (url.startsWith('data:') || url.startsWith('blob:') || url.includes('/api/proxy-image')) return url;
+  // Electron 环境下需要使用完整的 API server URL
+  // resolveApiBase() 会在请求拦截器中处理，这里使用相对路径即可
   return `/api/proxy-image?url=${encodeURIComponent(url)}`;
 }
 

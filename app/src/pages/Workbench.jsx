@@ -1303,7 +1303,7 @@ export default function Workbench() {
             onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setContextMenu({ visible: true, x: e.clientX, y: e.clientY, imageIndex: i }); }}
           >
             {img.url ? (
-              <img src={img.url} alt={img.prompt} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <img src={proxyImageUrl(img.url)} alt={img.prompt} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             ) : (
               <ImageIcon size={32} style={{ color: 'rgba(255,255,255,0.2)' }} />
             )}
