@@ -15,7 +15,7 @@
  *   - Supports cancellation via AbortSignal
  */
 
-import { apiPost, apiGet } from './client';
+import { apiPost, apiGet } from './client.js';
 
 const POLL_INITIAL_MS = 2000;
 const POLL_MAX_INTERVAL_MS = 10000;

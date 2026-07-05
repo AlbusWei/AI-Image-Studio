@@ -12,7 +12,7 @@
  * Response image URL is valid for 24 hours – callers should download & cache.
  */
 
-import { apiPost } from './client';
+import { apiPost } from './client.js';
 
 const T2I_MODEL = 'pre-qwen-image-3.0-preprocess-0703-t2iv1';
 const I2I_MODEL = 'pre-qwen-image-3.0-preprocess-0703-i2iv1';

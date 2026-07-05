@@ -161,23 +161,23 @@ async function preflight(options) {
 // gen — 生成图像
 program
   .command('gen')
-  .description('生成图像 (指定 prompt 和模型)')
-  .option('-p, --prompt <text>', '生成提示词')
+  .description('生成图像 (T2I / I2I，支持 Qwen、GPT-image-2、Nano Banana 2)')
+  .requiredOption('-p, --prompt <text>', '生成提示词')
   .option('-m, --model <id>', '模型 ID (qwen-image-3 | gpt-image-2 | nanobanana-2)', 'qwen-image-3')
-  .option('-n, --num <count>', '生成数量', '1')
-  .option('--ratio <ratio>', '宽高比')
-  .option('-o, --output <path>', '输出文件路径')
+  .option('--size <ratio>', '尺寸比例 (1:1 | 16:9 | 9:16 | 3:4 | 4:3 | auto)', '1:1')
+  .option('--count <n>', '一次生成数量 (1-4，取决于模型)', '1')
+  .option('--quality <level>', '质量档位 (模型相关，如 low/medium/high)')
+  .option('--expand', '调用 LLM 扩写 prompt', false)
+  .option('--image <path...>', '参考图本地路径 (可多次指定)')
+  .option('--seed <n>', '种子值 (-1 = 随机)', '-1')
+  .option('--negative <text>', '负面提示词 (仅 Qwen 支持)')
+  .option('--no-prompt-extend', '禁用 Qwen 内置 prompt_extend')
+  .option('--folder <name>', '自动归入指定文件夹 (不存在则创建)')
   .action(async (opts, cmd) => {
     const ctx = await preflight(cmd.parent.opts());
     if (!ctx) return;
-    const { port, quiet } = ctx;
-    // TODO: 后续 task 实现完整逻辑
-    outputResult({
-      command: 'gen',
-      status: 'not_implemented',
-      message: 'gen 命令尚未实现，将在后续版本中添加。',
-      port,
-    });
+    const { genAction } = await import('./commands/gen.mjs');
+    await genAction(opts, ctx);
   });
 
 // expand — 扩写提示词

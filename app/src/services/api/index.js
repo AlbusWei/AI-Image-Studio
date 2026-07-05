@@ -2,14 +2,14 @@
  * API layer – unified exports
  */
 
-import { QwenAdapter } from './qwen-adapter';
-import { GPTImageAdapter } from './gpt-image-adapter';
-import { NanoBananaAdapter } from './nano-banana-adapter';
-import { LLMAdapter } from './llm-adapter';
-import apiClient from './client';
+import { QwenAdapter } from './qwen-adapter.js';
+import { GPTImageAdapter } from './gpt-image-adapter.js';
+import { NanoBananaAdapter } from './nano-banana-adapter.js';
+import { LLMAdapter } from './llm-adapter.js';
+import apiClient from './client.js';
 
 export { apiClient };
-export { apiGet, apiPost, apiPut, apiDelete, createCancellable, proxyImageUrl } from './client';
+export { apiGet, apiPost, apiPut, apiDelete, createCancellable, proxyImageUrl } from './client.js';
 export { QwenAdapter, GPTImageAdapter, NanoBananaAdapter, LLMAdapter };
 
 /**
