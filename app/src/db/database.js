@@ -11,21 +11,37 @@
 
 import { createDexieBackend } from './dexie-backend';
 import { createElectronBackend } from './electron-backend';
+import { createHttpBackend } from './http-backend';
 
-/** @type {ReturnType<typeof createDexieBackend> | ReturnType<typeof createElectronBackend> | null} */
+/** @type {object|null} */
 let backend = null;
 
 /**
  * Initialise the database layer.  Call once at app startup.
- * Auto-detects Electron vs browser environment.
+ * Priority:
+ *   1. Electron IPC  → SQLite via preload bridge
+ *   2. HTTP backend  → SQLite via Electron api-server (browser tab)
+ *   3. Dexie         → IndexedDB (standalone browser, no Electron running)
  */
 export async function initDatabase() {
   if (window.electronAPI?.db) {
     backend = createElectronBackend(window.electronAPI);
+    await backend.open();
+    console.log('[DB] Using Electron IPC backend');
   } else {
-    backend = createDexieBackend();
+    // Try HTTP backend (Electron api-server must be running on port 19527)
+    try {
+      const httpBackend = createHttpBackend();
+      await httpBackend.open();
+      backend = httpBackend;
+      console.log('[DB] Using HTTP backend (SQLite via Electron api-server)');
+    } catch (e) {
+      console.warn('[DB] HTTP backend unavailable, falling back to Dexie:', e.message);
+      backend = createDexieBackend();
+      await backend.open();
+      console.log('[DB] Using Dexie / IndexedDB backend');
+    }
   }
-  await backend.open();
   return backend.raw;
 }
 

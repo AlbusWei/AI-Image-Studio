@@ -10,6 +10,7 @@
  *   /api/oss/*         → 阿里云 OSS
  *   /api/llm/*         → Expansion LLM (DashScope compatible)
  *   /api/proxy-image   → 外部图片 CORS 代理
+ *   /api/db/*          → SQLite database REST API
  */
 
 const http = require('http');
@@ -44,6 +45,32 @@ function readBody(req) {
     req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
+}
+
+/**
+ * 读取请求体并解析为 JSON。
+ */
+async function readJson(req) {
+  const buf = await readBody(req);
+  if (buf.length === 0) return {};
+  return JSON.parse(buf.toString('utf-8'));
+}
+
+/**
+ * 发送 JSON 响应。
+ */
+function sendJson(res, data, status = 200) {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify(data));
+}
+
+/**
+ * 发送错误响应。
+ */
+function sendError(res, err, status = 500) {
+  console.error('[api-server][db] Error:', err.message || err);
+  sendJson(res, { error: err.message || String(err) }, status);
 }
 
 /**
@@ -142,105 +169,434 @@ function matchRoute(rawUrl, prefix) {
   return null;
 }
 
-async function handleRequest(req, res) {
-  const rawUrl = req.url;
+/**
+ * 从路径中提取 :id 参数（数字）。
+ * 例: extractIdFromPath('/images/file/42', '/images/file/') → 42
+ */
+function extractIdFromPath(path, prefix) {
+  const rest = path.slice(prefix.length);
+  const id = parseInt(rest, 10);
+  return isNaN(id) ? null : id;
+}
 
-  // ─── Qwen DashScope ──────────────────────────────────────────
-  const qwenRemain = matchRoute(rawUrl, '/api/qwen');
-  if (qwenRemain !== null) {
-    const targetUrl = buildTargetUrl(QWEN_API_BASE, qwenRemain);
-    return proxyRequest(req, res, targetUrl, {
-      Authorization: `Bearer ${QWEN_API_KEY}`,
-    });
-  }
+// ─── DB API 路由 ───────────────────────────────────────────────────────
 
-  // ─── EvoLink (GPT-image-2 & Nano Banana 2) ──────────────────
-  const evolinkRemain = matchRoute(rawUrl, '/api/evolink');
-  if (evolinkRemain !== null) {
-    const targetUrl = buildTargetUrl(EVOLINK_API_BASE, evolinkRemain);
-    console.log('[api-server][evolink] targetUrl:', targetUrl);
-    return proxyRequest(req, res, targetUrl, {
-      Authorization: `Bearer ${EVOLINK_API_KEY}`,
-    });
-  }
+/**
+ * 创建 DB API 路由处理器。
+ * @param {object} queries - queries.cjs 导出的函数集合
+ * @param {object} fileManager - FileManager 实例
+ * @returns {function} handleDbRequest 函数
+ */
+function createDbRouter(queries, fileManager) {
 
-  // ─── Alibaba Cloud OSS ───────────────────────────────────────
-  const ossRemain = matchRoute(rawUrl, '/api/oss');
-  if (ossRemain !== null) {
-    const ossHost = `${OSS_BUCKET}.${OSS_REGION}.aliyuncs.com`;
-    const ossBase = `https://${ossHost}`;
-    const targetUrl = buildTargetUrl(ossBase, ossRemain);
-    return proxyRequest(req, res, targetUrl, {
-      'x-oss-access-key-id': OSS_ACCESS_KEY_ID,
-      'x-oss-access-key-secret': OSS_ACCESS_KEY_SECRET,
-      Host: ossHost,
-    });
-  }
+  async function handleDbRequest(req, res) {
+    const urlPath = parsePath(req.url);
+    const method = req.method;
 
-  // ─── Expansion LLM ───────────────────────────────────────────
-  const llmRemain = matchRoute(rawUrl, '/api/llm');
-  if (llmRemain !== null) {
-    const targetUrl = buildTargetUrl(LLM_BASE, llmRemain);
-    console.log('[api-server][llm] targetUrl:', targetUrl);
-    return proxyRequest(req, res, targetUrl, {
-      Authorization: `Bearer ${LLM_KEY}`,
-    });
-  }
-
-  // ─── Image Proxy (CORS) ──────────────────────────────────────
-  const proxyRemain = matchRoute(rawUrl, '/api/proxy-image');
-  if (proxyRemain !== null) {
-    const fullUrl = `http://localhost${rawUrl}`;
-    const parsed = new URL(fullUrl);
-    const imageUrl = parsed.searchParams.get('url');
-    if (!imageUrl) {
-      res.statusCode = 400;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: 'Missing url parameter' }));
-      return;
-    }
-    console.log('[api-server][proxy-image] Fetching:', imageUrl);
     try {
-      const response = await fetch(imageUrl);
-      if (!response.ok) {
-        res.statusCode = response.status;
-        res.end(`Upstream error: ${response.status} ${response.statusText}`);
+      // ── Images ──────────────────────────────────────────────────────
+
+      if (urlPath === '/api/db/images/add' && method === 'POST') {
+        const body = await readJson(req);
+        const result = queries.addImage(body.image || body);
+        const id = typeof result === 'number' ? result : result.id;
+        return sendJson(res, { id });
+      }
+
+      if (urlPath === '/api/db/images/update' && method === 'POST') {
+        const { id, changes } = await readJson(req);
+        const result = queries.updateImage(id, changes);
+        return sendJson(res, result ?? { ok: true });
+      }
+
+      if (urlPath === '/api/db/images/delete' && method === 'POST') {
+        const { id } = await readJson(req);
+        const result = queries.deleteImage(id);
+        // 同时删除文件
+        if (fileManager) {
+          try { await fileManager.deleteImage(id); } catch (_) {}
+        }
+        return sendJson(res, result ?? { ok: true });
+      }
+
+      if (urlPath === '/api/db/images/deleteMany' && method === 'POST') {
+        const { ids } = await readJson(req);
+        const result = queries.deleteImages(ids);
+        if (fileManager) {
+          try { await fileManager.deleteImages(ids); } catch (_) {}
+        }
+        return sendJson(res, result ?? { ok: true });
+      }
+
+      if (urlPath.startsWith('/api/db/images/get/') && method === 'GET') {
+        const id = parseInt(urlPath.slice('/api/db/images/get/'.length), 10);
+        if (isNaN(id)) return sendJson(res, { error: 'Invalid id' }, 400);
+        const row = queries.getImage(id);
+        if (!row) return sendJson(res, { error: 'Not found' }, 404);
+        // 标记是否有文件（供客户端决定是否下载 blob）
+        row.hasImage = !!(fileManager && fileManager.getImagePath(id));
+        row.hasThumbnail = !!(fileManager && fileManager.getThumbnailPath(id));
+        return sendJson(res, row);
+      }
+
+      if (urlPath === '/api/db/images/list' && method === 'POST') {
+        const { opts } = await readJson(req);
+        const rows = queries.getImages(opts || {});
+        return sendJson(res, rows);
+      }
+
+      if (urlPath === '/api/db/images/search' && method === 'POST') {
+        const { keyword } = await readJson(req);
+        const rows = queries.searchImages(keyword);
+        return sendJson(res, rows);
+      }
+
+      if (urlPath === '/api/db/images/stats' && method === 'GET') {
+        const stats = queries.getImageStats();
+        return sendJson(res, stats);
+      }
+
+      if (urlPath === '/api/db/images/toggleFavorite' && method === 'POST') {
+        const { id } = await readJson(req);
+        const result = queries.toggleImageFavorite(id);
+        return sendJson(res, result ?? { ok: true });
+      }
+
+      if (urlPath === '/api/db/images/move' && method === 'POST') {
+        const { ids, folderId } = await readJson(req);
+        const result = queries.moveImages(ids, folderId);
+        return sendJson(res, result ?? { ok: true });
+      }
+
+      // ── Image file upload (PUT raw binary) ──────────────────────────
+
+      if (urlPath.startsWith('/api/db/images/file/') && method === 'PUT') {
+        const id = parseInt(urlPath.slice('/api/db/images/file/'.length), 10);
+        if (isNaN(id)) return sendJson(res, { error: 'Invalid id' }, 400);
+        if (!fileManager) return sendJson(res, { error: 'FileManager not available' }, 503);
+        const buf = await readBody(req);
+        const mime = req.headers['content-type'] || 'image/png';
+        await fileManager.saveImage(id, buf, mime);
+        return sendJson(res, { ok: true, size: buf.length });
+      }
+
+      if (urlPath.startsWith('/api/db/images/thumbnail/') && method === 'PUT') {
+        const id = parseInt(urlPath.slice('/api/db/images/thumbnail/'.length), 10);
+        if (isNaN(id)) return sendJson(res, { error: 'Invalid id' }, 400);
+        if (!fileManager) return sendJson(res, { error: 'FileManager not available' }, 503);
+        const buf = await readBody(req);
+        await fileManager.saveThumbnail(id, buf);
+        return sendJson(res, { ok: true, size: buf.length });
+      }
+
+      // ── Image file download (GET binary) ────────────────────────────
+
+      if (urlPath.startsWith('/api/db/images/file/') && method === 'GET') {
+        const id = parseInt(urlPath.slice('/api/db/images/file/'.length), 10);
+        if (isNaN(id)) return sendJson(res, { error: 'Invalid id' }, 400);
+        if (!fileManager) return sendJson(res, { error: 'FileManager not available' }, 503);
+        const result = await fileManager.readImage(id);
+        if (!result) return sendJson(res, { error: 'File not found' }, 404);
+        res.statusCode = 200;
+        res.setHeader('Content-Type', result.mimeType || 'image/png');
+        res.setHeader('Content-Length', result.buffer.length);
+        return res.end(result.buffer);
+      }
+
+      if (urlPath.startsWith('/api/db/images/thumbnail/') && method === 'GET') {
+        const id = parseInt(urlPath.slice('/api/db/images/thumbnail/'.length), 10);
+        if (isNaN(id)) return sendJson(res, { error: 'Invalid id' }, 400);
+        if (!fileManager) return sendJson(res, { error: 'FileManager not available' }, 503);
+        const result = await fileManager.readThumbnail(id);
+        if (!result) return sendJson(res, { error: 'Thumbnail not found' }, 404);
+        res.statusCode = 200;
+        res.setHeader('Content-Type', result.mimeType || 'image/jpeg');
+        res.setHeader('Content-Length', result.buffer.length);
+        return res.end(result.buffer);
+      }
+
+      // ── Batches ─────────────────────────────────────────────────────
+
+      if (urlPath === '/api/db/batches/add' && method === 'POST') {
+        const body = await readJson(req);
+        const result = queries.addBatch(body.batch || body);
+        const id = typeof result === 'number' ? result : result.id;
+        return sendJson(res, { id });
+      }
+
+      if (urlPath === '/api/db/batches/list' && method === 'POST') {
+        const { sessionId } = await readJson(req);
+        const rows = queries.getBatches(sessionId ?? null);
+        return sendJson(res, rows);
+      }
+
+      // ── Sessions ────────────────────────────────────────────────────
+
+      if (urlPath === '/api/db/sessions/add' && method === 'POST') {
+        const result = queries.addSession();
+        const id = typeof result === 'number' ? result : result.id;
+        return sendJson(res, { id });
+      }
+
+      if (urlPath === '/api/db/sessions/list' && method === 'GET') {
+        const rows = queries.getSessions();
+        return sendJson(res, rows);
+      }
+
+      // ── Folders ─────────────────────────────────────────────────────
+
+      if (urlPath === '/api/db/folders/add' && method === 'POST') {
+        const body = await readJson(req);
+        const result = queries.addFolder(body.folder || body);
+        const id = typeof result === 'number' ? result : result.id;
+        return sendJson(res, { id });
+      }
+
+      if (urlPath === '/api/db/folders/list' && method === 'GET') {
+        const rows = queries.getFolders();
+        return sendJson(res, rows);
+      }
+
+      if (urlPath === '/api/db/folders/update' && method === 'POST') {
+        const { id, changes } = await readJson(req);
+        const result = queries.updateFolder(id, changes);
+        return sendJson(res, result ?? { ok: true });
+      }
+
+      if (urlPath === '/api/db/folders/delete' && method === 'POST') {
+        const { id } = await readJson(req);
+        const result = queries.deleteFolder(id);
+        return sendJson(res, result ?? { ok: true });
+      }
+
+      // ── Tasks ───────────────────────────────────────────────────────
+
+      if (urlPath === '/api/db/tasks/add' && method === 'POST') {
+        const body = await readJson(req);
+        const result = queries.addTask(body.task || body);
+        const id = typeof result === 'number' ? result : result.id;
+        return sendJson(res, { id });
+      }
+
+      if (urlPath === '/api/db/tasks/update' && method === 'POST') {
+        const { id, changes } = await readJson(req);
+        const result = queries.updateTask(id, changes);
+        return sendJson(res, result ?? { ok: true });
+      }
+
+      if (urlPath === '/api/db/tasks/list' && method === 'POST') {
+        const { filter } = await readJson(req);
+        const rows = queries.getTasks(filter || {});
+        return sendJson(res, rows);
+      }
+
+      if (urlPath === '/api/db/tasks/delete' && method === 'POST') {
+        const { id } = await readJson(req);
+        const result = queries.deleteTask(id);
+        return sendJson(res, result ?? { ok: true });
+      }
+
+      if (urlPath === '/api/db/tasks/stats' && method === 'GET') {
+        const stats = queries.getTaskStats();
+        return sendJson(res, stats);
+      }
+
+      // ── Settings ────────────────────────────────────────────────────
+
+      if (urlPath === '/api/db/settings/getAll' && method === 'GET') {
+        const settings = queries.getAllSettings();
+        return sendJson(res, settings);
+      }
+
+      if (urlPath === '/api/db/settings/set' && method === 'POST') {
+        const { key, value } = await readJson(req);
+        const result = queries.setSetting(key, value);
+        return sendJson(res, result ?? { ok: true });
+      }
+
+      if (urlPath.startsWith('/api/db/settings/get/') && method === 'GET') {
+        const key = decodeURIComponent(urlPath.slice('/api/db/settings/get/'.length));
+        const value = queries.getSetting(key);
+        return sendJson(res, { key, value: value !== undefined ? value : null });
+      }
+
+      // ── Case Packages ───────────────────────────────────────────────
+
+      if (urlPath === '/api/db/casePackages/add' && method === 'POST') {
+        const body = await readJson(req);
+        const result = queries.addCasePackage(body.pkg || body);
+        const id = typeof result === 'number' ? result : result.id;
+        return sendJson(res, { id });
+      }
+
+      if (urlPath === '/api/db/casePackages/list' && method === 'GET') {
+        const rows = queries.getCasePackages();
+        return sendJson(res, rows);
+      }
+
+      if (urlPath === '/api/db/casePackages/update' && method === 'POST') {
+        const { id, changes } = await readJson(req);
+        const result = queries.updateCasePackage(id, changes);
+        return sendJson(res, result ?? { ok: true });
+      }
+
+      if (urlPath === '/api/db/casePackages/delete' && method === 'POST') {
+        const { id } = await readJson(req);
+        const result = queries.deleteCasePackage(id);
+        return sendJson(res, result ?? { ok: true });
+      }
+
+      // ── DB 404 ──────────────────────────────────────────────────────
+      return sendJson(res, { error: 'Unknown DB endpoint', path: urlPath }, 404);
+
+    } catch (err) {
+      return sendError(res, err);
+    }
+  }
+
+  return handleDbRequest;
+}
+
+// ─── 主路由处理 ────────────────────────────────────────────────────────
+
+function createRequestHandler(dbRouter) {
+
+  async function handleRequest(req, res) {
+    const rawUrl = req.url;
+
+    // ─── CORS headers (for browser dev mode) ────────────────────────
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    if (req.method === 'OPTIONS') {
+      res.statusCode = 204;
+      return res.end();
+    }
+
+    // ─── DB API (SQLite) ────────────────────────────────────────────
+    if (dbRouter && rawUrl.startsWith('/api/db')) {
+      return dbRouter(req, res);
+    }
+
+    // ─── Qwen DashScope ──────────────────────────────────────────
+    const qwenRemain = matchRoute(rawUrl, '/api/qwen');
+    if (qwenRemain !== null) {
+      const targetUrl = buildTargetUrl(QWEN_API_BASE, qwenRemain);
+      return proxyRequest(req, res, targetUrl, {
+        Authorization: `Bearer ${QWEN_API_KEY}`,
+      });
+    }
+
+    // ─── EvoLink (GPT-image-2 & Nano Banana 2) ──────────────────
+    const evolinkRemain = matchRoute(rawUrl, '/api/evolink');
+    if (evolinkRemain !== null) {
+      const targetUrl = buildTargetUrl(EVOLINK_API_BASE, evolinkRemain);
+      console.log('[api-server][evolink] targetUrl:', targetUrl);
+      return proxyRequest(req, res, targetUrl, {
+        Authorization: `Bearer ${EVOLINK_API_KEY}`,
+      });
+    }
+
+    // ─── Alibaba Cloud OSS ───────────────────────────────────────
+    const ossRemain = matchRoute(rawUrl, '/api/oss');
+    if (ossRemain !== null) {
+      const ossHost = `${OSS_BUCKET}.${OSS_REGION}.aliyuncs.com`;
+      const ossBase = `https://${ossHost}`;
+      const targetUrl = buildTargetUrl(ossBase, ossRemain);
+      return proxyRequest(req, res, targetUrl, {
+        'x-oss-access-key-id': OSS_ACCESS_KEY_ID,
+        'x-oss-access-key-secret': OSS_ACCESS_KEY_SECRET,
+        Host: ossHost,
+      });
+    }
+
+    // ─── Expansion LLM ───────────────────────────────────────────
+    const llmRemain = matchRoute(rawUrl, '/api/llm');
+    if (llmRemain !== null) {
+      const targetUrl = buildTargetUrl(LLM_BASE, llmRemain);
+      console.log('[api-server][llm] targetUrl:', targetUrl);
+      return proxyRequest(req, res, targetUrl, {
+        Authorization: `Bearer ${LLM_KEY}`,
+      });
+    }
+
+    // ─── Image Proxy (CORS) ──────────────────────────────────────
+    const proxyRemain = matchRoute(rawUrl, '/api/proxy-image');
+    if (proxyRemain !== null) {
+      const fullUrl = `http://localhost${rawUrl}`;
+      const parsed = new URL(fullUrl);
+      const imageUrl = parsed.searchParams.get('url');
+      if (!imageUrl) {
+        res.statusCode = 400;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: 'Missing url parameter' }));
         return;
       }
-      const contentType = response.headers.get('content-type');
-      if (contentType) res.setHeader('Content-Type', contentType);
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-      const buffer = Buffer.from(await response.arrayBuffer());
-      console.log('[api-server][proxy-image] ←', response.status, contentType, buffer.length, 'bytes');
-      res.end(buffer);
-    } catch (err) {
-      console.error('[api-server][proxy-image] Error:', err.message);
-      res.statusCode = 500;
-      res.end('Failed to fetch image');
+      console.log('[api-server][proxy-image] Fetching:', imageUrl);
+      try {
+        const response = await fetch(imageUrl);
+        if (!response.ok) {
+          res.statusCode = response.status;
+          res.end(`Upstream error: ${response.status} ${response.statusText}`);
+          return;
+        }
+        const contentType = response.headers.get('content-type');
+        if (contentType) res.setHeader('Content-Type', contentType);
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        const buffer = Buffer.from(await response.arrayBuffer());
+        console.log('[api-server][proxy-image] ←', response.status, contentType, buffer.length, 'bytes');
+        res.end(buffer);
+      } catch (err) {
+        console.error('[api-server][proxy-image] Error:', err.message);
+        res.statusCode = 500;
+        res.end('Failed to fetch image');
+      }
+      return;
     }
-    return;
+
+    // ─── 404 ─────────────────────────────────────────────────────
+    res.statusCode = 404;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ error: 'Not Found', path: rawUrl }));
   }
 
-  // ─── 404 ─────────────────────────────────────────────────────
-  res.statusCode = 404;
-  res.setHeader('Content-Type', 'application/json');
-  res.end(JSON.stringify({ error: 'Not Found', path: rawUrl }));
+  return handleRequest;
 }
 
 // ─── 启动 ─────────────────────────────────────────────────────────────
 
 /**
- * 启动 API 代理服务器，监听随机端口。
+ * 启动 API 代理服务器。
+ * @param {object} [opts]
+ * @param {object} [opts.fileManager]  - FileManager 实例，用于图片文件读写
+ * @param {number} [opts.port]        - 监听端口（0 = 随机端口）
  * @returns {Promise<number>} 实际监听的端口号
  */
-function startApiServer() {
+function startApiServer(opts = {}) {
+  const { fileManager = null, port = 0 } = opts;
+
+  // 懒加载 queries（仅在有 fileManager 时才启用 DB 路由）
+  let dbRouter = null;
+  try {
+    const queries = require('./database/queries.cjs');
+    dbRouter = createDbRouter(queries, fileManager);
+    console.log('[api-server] DB API routes enabled');
+  } catch (err) {
+    console.warn('[api-server] Could not load queries.cjs, DB routes disabled:', err.message);
+  }
+
+  const handler = createRequestHandler(dbRouter);
+
   return new Promise((resolve, reject) => {
-    const server = http.createServer(handleRequest);
-    server.listen(0, '127.0.0.1', () => {
-      const port = server.address().port;
-      console.log(`[api-server] Listening on 127.0.0.1:${port}`);
+    const server = http.createServer(handler);
+    server.listen(port, '127.0.0.1', () => {
+      const actualPort = server.address().port;
+      console.log(`[api-server] Listening on 127.0.0.1:${actualPort}`);
       console.log('[api-server] Proxy routes: /api/qwen, /api/evolink, /api/oss, /api/llm, /api/proxy-image');
-      resolve(port);
+      if (dbRouter) {
+        console.log('[api-server] DB route: /api/db/*');
+      }
+      resolve(actualPort);
     });
     server.on('error', reject);
   });

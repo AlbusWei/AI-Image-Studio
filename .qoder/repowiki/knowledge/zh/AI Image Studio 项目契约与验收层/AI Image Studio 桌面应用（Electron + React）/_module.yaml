@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: app
-title: AI 图像工作室前端应用（React + Vite）
+title: AI Image Studio 桌面应用（Electron + React）
 scope:
     - app/
 source_files: []

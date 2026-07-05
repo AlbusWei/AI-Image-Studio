@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: ""
-title: AI 图像工作室项目根（文档与验收证据）
+title: AI Image Studio 项目契约与验收层
 scope:
     - README.md
     - .gitignore

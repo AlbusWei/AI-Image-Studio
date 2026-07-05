@@ -2,11 +2,14 @@
 
 <cite>
 **本文引用的文件**
+- [app/electron/api-server.cjs](file://app/electron/api-server.cjs)
 - [app/src/server/api-proxy.js](file://app/src/server/api-proxy.js)
 - [app/vite.config.js](file://app/vite.config.js)
 - [app/package.json](file://app/package.json)
 - [app/src/services/api/client.js](file://app/src/services/api/client.js)
-- [app/src/pages/ApiTest.jsx](file://app/src/pages/ApiTest.jsx)
+- [app/electron/main.cjs](file://app/electron/main.cjs)
+- [app/electron/preload.cjs](file://app/electron/preload.cjs)
+- [app/electron/ipc-handlers.cjs](file://app/electron/ipc-handlers.cjs)
 - [app/src/components/MaskEditor.jsx](file://app/src/components/MaskEditor.jsx)
 - [app/src/services/storage.js](file://app/src/services/storage.js)
 - [app/src/pages/Workbench.jsx](file://app/src/pages/Workbench.jsx)
@@ -14,10 +17,12 @@
 
 ## 更新摘要
 **变更内容**
-- 新增 `/api/proxy-image` CORS 代理端点，专门用于绕过 EvoLink 等外部服务的跨域限制
-- 添加 `proxyImageUrl()` 工具函数，自动将外部图片 URL 重写为代理格式
-- 在多个组件中集成 CORS 代理功能，包括 MaskEditor、StorageService 和 Workbench
-- 更新架构图以反映新的图片代理流程
+- **重大架构变更**：API 代理从 Vite 开发服务器插件迁移到 Electron 主进程内嵌 HTTP 服务器
+- **新增嵌入式 HTTP 服务器**：在 Electron main 进程中启动独立的 API 代理服务器，监听随机端口
+- **动态端口发现机制**：通过 IPC 通信让渲染进程动态获取 API 服务器端口
+- **环境自适应客户端**：axios 客户端自动检测运行环境并调整 baseURL
+- **保持向后兼容**：Vite 插件版本保留用于浏览器开发环境
+- **统一代理功能**：支持 Qwen、EvoLink、OSS、LLM 和 CORS 图片代理
 
 ## 目录
 1. [简介](#简介)
@@ -32,112 +37,166 @@
 10. [结论](#结论)
 
 ## 简介
-本文件为 AI Image Studio 的 API 代理服务提供完整技术文档。该服务以 Vite 开发服务器插件的形式实现，负责在开发环境下统一转发前端对多个 AI 模型与云服务的请求，包括：
-- 通义千问（DashScope）图像生成接口
-- EvoLink（GPT-image-2、Nano Banana 2）
-- 阿里云 OSS
-- 扩展 LLM（兼容 DashScope/OpenAI 风格）
-- **新增：CORS 图片代理（绕过外部服务跨域限制）**
+本文件为 AI Image Studio 的 API 代理服务提供完整技术文档。**重要架构变更**：API 代理已从 Vite 开发服务器插件迁移到 Electron 主进程内嵌 HTTP 服务器，实现了生产环境的独立代理服务，不再依赖 Vite 开发服务器。
+
+该服务现在支持两种运行模式：
+- **Electron 桌面应用**：使用嵌入式 HTTP 服务器，监听本地随机端口
+- **浏览器开发环境**：保留 Vite 插件模式用于开发调试
 
 代理层承担以下职责：
-- 路由分发：按 /api/qwen、/api/evolink、/api/oss、/api/llm、/api/proxy-image 前缀将请求转发到对应后端
-- 鉴权注入：自动注入 Bearer Token 或 OSS 访问头
-- 请求体处理：兼容 Vite 中间件已解析 body 的情况，确保正确转发
-- 响应透传：过滤不安全的传输相关头，避免浏览器重复解压
-- 错误转发：将上游异常转换为统一的 502 JSON 错误
-- **CORS 绕过：通过专用图片代理端点解决外部图片加载的跨域问题**
+- **路由分发**：按 /api/qwen、/api/evolink、/api/oss、/api/llm、/api/proxy-image 前缀将请求转发到对应后端
+- **鉴权注入**：自动注入 Bearer Token 或 OSS 访问头
+- **请求体处理**：兼容不同环境的 body-parser 行为，确保正确转发
+- **响应透传**：过滤不安全的传输相关头，避免浏览器重复解压
+- **错误转发**：将上游异常转换为统一的 502 JSON 错误
+- **CORS 绕过**：通过专用图片代理端点解决外部图片加载的跨域问题
+- **动态端口管理**：在 Electron 环境中自动发现 API 服务器端口
 
-此外，客户端通过 axios 实例统一以 /api 前缀发起请求，天然规避跨域问题。
+此外，客户端通过 axios 实例智能选择正确的 baseURL，在 Electron 环境下指向嵌入式服务器，在浏览器环境下使用相对路径。
 
 ## 项目结构
-API 代理服务由一个 Vite 插件构成，并在 vite.config.js 中注册。前端通过统一的 HTTP 客户端调用 /api/* 路径，由插件拦截并转发至目标服务。
+API 代理服务现在由两个主要部分组成：
+- **嵌入式 HTTP 服务器**（Electron 主进程）：生产环境的主要实现
+- **Vite 插件**（开发环境）：浏览器开发时的备用方案
 
 ```mermaid
 graph TB
-A["浏览器<br/>React 应用"] --> B["Vite 开发服务器"]
-B --> C["插件: apiProxyPlugin()<br/>注册中间件 /api/*"]
-C --> D["Qwen DashScope 端点"]
-C --> E["EvoLink 端点"]
-C --> F["阿里云 OSS 端点"]
-C --> G["LLM 扩展端点"]
-C --> H["CORS 图片代理端点<br/>/api/proxy-image"]
-H --> I["外部图片服务<br/>EvoLink/OSS/其他"]
+subgraph "Electron 桌面应用"
+A["浏览器<br/>React 应用"] --> B["axios 客户端<br/>动态 baseURL"]
+B --> C["IPC 通信<br/>getApiPort()"]
+C --> D["Electron Main 进程"]
+D --> E["嵌入式 HTTP 服务器<br/>监听随机端口"]
+E --> F["Qwen DashScope 端点"]
+E --> G["EvoLink 端点"]
+E --> H["阿里云 OSS 端点"]
+E --> I["LLM 扩展端点"]
+E --> J["CORS 图片代理端点<br/>/api/proxy-image"]
+J --> K["外部图片服务<br/>EvoLink/OSS/其他"]
+end
+subgraph "浏览器开发环境"
+L["浏览器<br/>React 应用"] --> M["Vite 开发服务器"]
+M --> N["Vite 插件<br/>apiProxyPlugin()"]
+N --> O["Qwen/EvoLink/OSS/LLM 端点"]
+N --> P["CORS 图片代理"]
+end
 ```
 
 **图表来源**
-- [app/vite.config.js:1-12](file://app/vite.config.js#L1-L12)
+- [app/electron/api-server.cjs:236-247](file://app/electron/api-server.cjs#L236-L247)
 - [app/src/server/api-proxy.js:121-221](file://app/src/server/api-proxy.js#L121-L221)
+- [app/src/services/api/client.js:22-37](file://app/src/services/api/client.js#L22-L37)
 
 ## 核心组件
-- Vite 插件入口：导出一个工厂函数，返回插件对象，在 configureServer 钩子中挂载中间件
-- 通用代理函数：读取请求体、构建目标 URL、注入额外请求头、转发请求、透传响应与状态码、统一错误处理
-- **CORS 图片代理函数：专门处理外部图片 URL 的跨域问题，支持缓存控制**
-- 环境变量加载：使用 Vite 的 loadEnv 读取 .env 中的配置项，避免泄露到客户端
-- **proxyImageUrl 工具函数：自动重写外部图片 URL 为代理格式**
+- **嵌入式 HTTP 服务器**：基于 Node.js http.createServer 构建，在 Electron main 进程中启动
+- **通用代理函数**：读取请求体、构建目标 URL、注入额外请求头、转发请求、透传响应与状态码、统一错误处理
+- **CORS 图片代理函数**：专门处理外部图片 URL 的跨域问题，支持缓存控制
+- **环境变量加载**：使用 dotenv 模块读取 .env 中的配置项
+- **动态端口发现**：通过 IPC 通信让渲染进程获取 API 服务器实际端口
+- **环境自适应客户端**：axios 客户端根据运行环境自动调整 baseURL
+- **proxyImageUrl 工具函数**：自动重写外部图片 URL 为代理格式
 
 关键要点
 - 所有密钥仅存在于 Node 侧，不会进入浏览器打包产物
-- 支持 POST/PUT/PATCH 的请求体转发，兼容 Vite 内部 body-parser 已消费流的情况
+- 支持 POST/PUT/PATCH 的请求体转发，兼容不同环境的 body-parser 行为
 - 自动计算 Content-Length，避免上游因分块编码导致的长度不一致
 - 过滤 transfer-encoding、connection、content-encoding、content-length 等头部，防止浏览器二次解压或长度错误
 - **CORS 代理提供 24 小时缓存控制，提升图片加载性能**
+- **Electron 环境自动发现 API 服务器端口，无需手动配置**
 
 **章节来源**
-- [app/src/server/api-proxy.js:25-116](file://app/src/server/api-proxy.js#L25-L116)
-- [app/src/server/api-proxy.js:121-221](file://app/src/server/api-proxy.js#L121-L221)
-- [app/src/services/api/client.js:145-157](file://app/src/services/api/client.js#L145-L157)
+- [app/electron/api-server.cjs:61-116](file://app/electron/api-server.cjs#L61-L116)
+- [app/electron/api-server.cjs:190-222](file://app/electron/api-server.cjs#L190-L222)
+- [app/src/services/api/client.js:22-37](file://app/src/services/api/client.js#L22-L37)
+- [app/src/services/api/client.js:182-188](file://app/src/services/api/client.js#L182-L188)
 
 ## 架构总览
-下图展示了从浏览器到各上游服务的完整调用链，以及代理层的关键处理步骤，包括新增的 CORS 图片代理流程。
+下图展示了新的嵌入式 HTTP 服务器架构，包括 Electron 环境和浏览器环境的完整调用链。
 
 ```mermaid
 sequenceDiagram
-participant Client as "浏览器"
-participant Vite as "Vite 开发服务器"
-participant Proxy as "apiProxyPlugin 中间件"
+participant Client as "浏览器/Renderer"
+participant Axios as "axios 客户端"
+participant IPC as "IPC 通信"
+participant Main as "Electron Main 进程"
+participant Server as "嵌入式 HTTP 服务器"
 participant Upstream as "上游服务(Qwen/EvoLink/OSS/LLM)"
 participant ImgProxy as "CORS 图片代理"
 participant External as "外部图片服务"
+Note over Client,External : Electron 环境初始化流程
+Client->>Axios : "创建 axios 实例"
+Axios->>IPC : "getApiPort()"
+IPC->>Main : "app : getApiPort"
+Main-->>IPC : "返回 API 服务器端口"
+IPC-->>Axios : "返回端口号"
+Axios->>Axios : "设置 baseURL = http : //127.0.0.1 : {port}/api"
 Note over Client,External : 常规 API 请求流程
-Client->>Vite : "GET/POST /api/{qwen|evolink|oss|llm}/... (含请求体)"
-Vite->>Proxy : "匹配路由并调用中间件"
-Proxy->>Proxy : "读取请求体(兼容已解析body)"
-Proxy->>Proxy : "构建目标URL + 注入鉴权头"
-Proxy->>Upstream : "fetch(targetUrl, {method, headers, body})"
-Upstream-->>Proxy : "返回响应(状态码+头+体)"
-Proxy->>Proxy : "过滤传输相关头, 计算响应体大小"
-Proxy-->>Client : "透传状态码/头/体"
+Client->>Axios : "GET/POST /api/{qwen|evolink|oss|llm}/..."
+Axios->>Server : "http : //127.0.0.1 : {port}/api/... (含请求体)"
+Server->>Server : "匹配路由 + 读取请求体"
+Server->>Server : "构建目标URL + 注入鉴权头"
+Server->>Upstream : "fetch(targetUrl, {method, headers, body})"
+Upstream-->>Server : "返回响应(状态码+头+体)"
+Server->>Server : "过滤传输相关头, 计算响应体大小"
+Server-->>Client : "透传状态码/头/体"
 Note over Client,External : CORS 图片代理流程
-Client->>Vite : "GET /api/proxy-image?url=external_image_url"
-Vite->>Proxy : "匹配 /api/proxy-image 路由"
-Proxy->>ImgProxy : "调用图片代理中间件"
+Client->>Axios : "GET /api/proxy-image?url=external_image_url"
+Axios->>Server : "转发到嵌入式服务器"
+Server->>ImgProxy : "调用图片代理中间件"
 ImgProxy->>External : "fetch(imageUrl) 绕过 CORS"
 External-->>ImgProxy : "返回图片数据"
 ImgProxy->>ImgProxy : "设置缓存控制头"
 ImgProxy-->>Client : "返回图片数据(带缓存)"
-Note over Proxy,External : "异常时返回 502 JSON 错误"
+Note over Server,External : "异常时返回 502 JSON 错误"
 ```
 
 **图表来源**
-- [app/src/server/api-proxy.js:55-116](file://app/src/server/api-proxy.js#L55-L116)
-- [app/src/server/api-proxy.js:185-214](file://app/src/server/api-proxy.js#L185-L214)
+- [app/electron/api-server.cjs:145-228](file://app/electron/api-server.cjs#L145-L228)
+- [app/src/services/api/client.js:22-37](file://app/src/services/api/client.js#L22-L37)
+- [app/electron/main.cjs:94-102](file://app/electron/main.cjs#L94-L102)
 
 ## 详细组件分析
 
+### 嵌入式 HTTP 服务器
+**重大更新** - 替代 Vite 插件的生产环境实现：
+
+- **HTTP 服务器创建**：使用 Node.js http.createServer 创建独立服务器
+- **随机端口监听**：监听 127.0.0.1:0，系统自动分配可用端口
+- **环境变量加载**：通过 dotenv 模块从 .env 文件加载配置
+- **路由匹配器**：自定义 matchRoute 函数支持精确前缀匹配
+- **统一请求处理**：handleRequest 函数集中处理所有路由逻辑
+
+**章节来源**
+- [app/electron/api-server.cjs:236-247](file://app/electron/api-server.cjs#L236-L247)
+- [app/electron/api-server.cjs:133-143](file://app/electron/api-server.cjs#L133-L143)
+- [app/electron/api-server.cjs:145-228](file://app/electron/api-server.cjs#L145-L228)
+
+### 动态端口发现机制
+**新增功能** - 解决 Electron 环境中 API 服务器端口动态分配的问题：
+
+- **IPC 通信接口**：通过 `app:getApiPort` 通道暴露端口信息
+- **预加载脚本桥接**：preload.cjs 暴露 electronAPI.getApiPort() 给渲染进程
+- **客户端自动检测**：axios 拦截器在请求前动态获取端口并设置 baseURL
+- **环境自适应**：Electron 环境使用完整 URL，浏览器环境使用相对路径
+
+**章节来源**
+- [app/electron/preload.cjs:66-67](file://app/electron/preload.cjs#L66-67)
+- [app/electron/ipc-handlers.cjs:10-60](file://app/electron/ipc-handlers.cjs#L10-60)
+- [app/src/services/api/client.js:22-37](file://app/src/services/api/client.js#L22-L37)
+
 ### 路由与中间件
-- /api/qwen/*：转发至 Qwen DashScope，注入 Authorization: Bearer <key>
-- /api/evolink/*：转发至 EvoLink，注入 Authorization: Bearer <key>
-- /api/oss/*：转发至阿里云 OSS REST 端点，注入 x-oss-access-key-id、x-oss-access-key-secret、Host
-- /api/llm/*：转发至 LLM 扩展服务，注入 Authorization: Bearer <key>
-- **/api/proxy-image：CORS 图片代理，接收 url 参数，绕过外部服务跨域限制**
+- `/api/qwen/*`：转发至 Qwen DashScope，注入 Authorization: Bearer <key>
+- `/api/evolink/*`：转发至 EvoLink，注入 Authorization: Bearer <key>
+- `/api/oss/*`：转发至阿里云 OSS REST 端点，注入 x-oss-access-key-id、x-oss-access-key-secret、Host
+- `/api/llm/*`：转发至 LLM 扩展服务，注入 Authorization: Bearer <key>
+- `/api/proxy-image`：CORS 图片代理，接收 url 参数，绕过外部服务跨域限制
 
 每个路由均基于环境变量动态拼接目标地址，并通过通用代理函数完成转发。
 
 **章节来源**
-- [app/src/server/api-proxy.js:139-214](file://app/src/server/api-proxy.js#L139-L214)
+- [app/electron/api-server.cjs:148-222](file://app/electron/api-server.cjs#L148-L222)
 
 ### CORS 图片代理端点
-**新增功能** - 专门解决外部图片加载的跨域问题：
+**功能增强** - 在嵌入式服务器中实现相同功能的图片代理：
 
 - **URL 参数验证**：检查必需的 url 参数是否存在
 - **外部请求转发**：使用 fetch 直接获取外部图片资源
@@ -146,67 +205,68 @@ Note over Proxy,External : "异常时返回 502 JSON 错误"
 - **缓存优化**：设置 Cache-Control: public, max-age=86400（24小时缓存）
 
 **章节来源**
-- [app/src/server/api-proxy.js:185-214](file://app/src/server/api-proxy.js#L185-L214)
+- [app/electron/api-server.cjs:190-222](file://app/electron/api-server.cjs#L190-L222)
 
 ### proxyImageUrl 工具函数
-**新增功能** - 自动重写外部图片 URL：
+**功能增强** - 支持 Electron 环境的智能 URL 重写：
 
 - **智能识别**：检测 data:、blob: 和已代理的 URL，直接返回原值
 - **自动重写**：将 http(s) URL 包装为 /api/proxy-image?url=encodeURIComponent(...)
 - **安全编码**：使用 encodeURIComponent 确保 URL 参数安全传递
+- **环境兼容**：注释说明 Electron 环境下 baseURL 会在请求拦截器中处理
 
 **章节来源**
-- [app/src/services/api/client.js:145-157](file://app/src/services/api/client.js#L145-L157)
+- [app/src/services/api/client.js:182-188](file://app/src/services/api/client.js#L182-L188)
 
 ### 组件集成
-CORS 代理功能已在多个组件中集成：
+CORS 代理功能已在多个组件中集成，部分组件需要更新以使用新的工具函数：
 
 #### MaskEditor 组件
-- 检测外部图片 URL（http:// 或 https://）
-- 自动通过代理端点加载图片，避免 Canvas 跨域污染
+- **当前实现**：直接使用硬编码的 `/api/proxy-image` URL
+- **建议改进**：使用 `proxyImageUrl()` 工具函数以获得更好的环境兼容性
 
 #### StorageService
-- 在 getImage 方法中使用代理获取外部图片
-- 缓存 blob URL 以提升后续访问性能
+- **功能正常**：在 getImage 方法中使用代理获取外部图片
+- **缓存优化**：缓存 blob URL 以提升后续访问性能
 
 #### Workbench 页面
-- 在 imageToBase64 函数中使用代理作为回退方案
-- 确保外部图片能够正确转换为 Base64 格式
+- **功能正常**：在 imageToBase64 函数中使用代理作为回退方案
+- **确保兼容**：外部图片能够正确转换为 Base64 格式
 
 **章节来源**
 - [app/src/components/MaskEditor.jsx:450-456](file://app/src/components/MaskEditor.jsx#L450-L456)
-- [app/src/services/storage.js:101-116](file://app/src/services/storage.js#L101-L116)
-- [app/src/pages/Workbench.jsx:347-361](file://app/src/pages/Workbench.jsx#L347-L361)
+- [app/src/services/storage.js:128-148](file://app/src/services/storage.js#L128-L148)
+- [app/src/pages/Workbench.jsx:347-361](file://app/src/pages/Workbench.jsx#L347-361)
 
 ### 请求体处理
-- 若 req.body 已由 Vite 中间件解析，则直接转为 Buffer
-- 否则监听 data/end 事件手动拼装 Buffer
-- 针对 POST/PUT/PATCH 方法才读取请求体
+- **简化实现**：嵌入式服务器使用标准的流式读取，不依赖 Vite 内部中间件
+- **Promise 封装**：将事件驱动的流读取封装为 Promise，便于异步处理
+- **错误处理**：完善的错误捕获和拒绝处理
 
 **章节来源**
-- [app/src/server/api-proxy.js:25-39](file://app/src/server/api-proxy.js#L25-L39)
+- [app/electron/api-server.cjs:40-47](file://app/electron/api-server.cjs#L40-L47)
 
 ### 目标 URL 构建
-- 去除 base 末尾多余斜杠
-- 保证 path 以单个斜杠连接
-- 用于拼接 Qwen/EvoLink/OSS/LLM 的基础地址与具体路径
+- **路径清理**：去除 base 末尾多余斜杠
+- **路径连接**：保证 path 以单个斜杠连接
+- **通用性**：用于拼接 Qwen/EvoLink/OSS/LLM 的基础地址与具体路径
 
 **章节来源**
-- [app/src/server/api-proxy.js:45-49](file://app/src/server/api-proxy.js#L45-L49)
+- [app/electron/api-server.cjs:52-56](file://app/electron/api-server.cjs#L52-L56)
 
 ### 通用代理流程
-- 合并 extraHeaders 与 Content-Type
-- 根据实际 body 设置 Content-Length
-- 使用 fetch 发起请求
-- 透传状态码与响应头（过滤特定头）
-- 读取 arrayBuffer 后转 Buffer 输出
-- 捕获异常并返回 502 JSON 错误
+- **请求头合并**：合并 extraHeaders 与 Content-Type
+- **长度计算**：根据实际 body 设置 Content-Length
+- **请求发起**：使用 fetch 发起请求
+- **响应透传**：透传状态码与响应头（过滤特定头）
+- **数据处理**：读取 arrayBuffer 后转 Buffer 输出
+- **异常处理**：捕获异常并返回 502 JSON 错误
 
 **章节来源**
-- [app/src/server/api-proxy.js:55-116](file://app/src/server/api-proxy.js#L55-L116)
+- [app/electron/api-server.cjs:61-116](file://app/electron/api-server.cjs#L61-L116)
 
 ### 环境变量与配置项
-插件在启动时通过 Vite 的 loadEnv 读取以下变量（示例键名）：
+嵌入式服务器通过 dotenv 模块加载以下变量（示例键名）：
 - VITE_QWEN_API_KEY、VITE_QWEN_API_BASE
 - VITE_EVOLINK_API_KEY、VITE_EVOLINK_API_BASE
 - VITE_OSS_ACCESS_KEY_ID、VITE_OSS_ACCESS_KEY_SECRET、VITE_OSS_BUCKET、VITE_OSS_REGION
@@ -215,132 +275,177 @@ CORS 代理功能已在多个组件中集成：
 这些变量仅在 Node 环境可用，不会被打包进浏览器代码。
 
 **章节来源**
-- [app/src/server/api-proxy.js:126-137](file://app/src/server/api-proxy.js#L126-L137)
+- [app/electron/api-server.cjs:24-33](file://app/electron/api-server.cjs#L24-L33)
 
-### 客户端集成与跨域规避
-- 前端 axios 实例 baseURL 设置为 /api，所有请求经 Vite 开发服务器本地转发，无需跨域
-- 提供长超时客户端用于同步图像生成类接口
-- 内置重试与取消信号支持，便于上层任务编排
-- **新增 proxyImageUrl 工具函数，自动处理外部图片的跨域问题**
+### 客户端集成与环境自适应
+**重大更新** - 支持双环境运行的智能客户端：
+
+- **环境检测**：自动检测是否在 Electron 环境中运行
+- **动态端口获取**：通过 IPC 获取 API 服务器实际端口
+- **baseURL 自适应**：Electron 环境使用完整 URL，浏览器环境使用相对路径
+- **请求拦截器**：在每次请求前动态解析 baseURL
+- **长超时客户端**：提供专门的长超时客户端用于同步图像生成类接口
+- **重试机制**：内置指数退避重试与取消信号支持
 
 **章节来源**
-- [app/src/services/api/client.js:18-33](file://app/src/services/api/client.js#L18-L33)
-- [app/src/services/api/client.js:38-88](file://app/src/services/api/client.js#L38-88)
-- [app/src/services/api/client.js:145-157](file://app/src/services/api/client.js#L145-L157)
+- [app/src/services/api/client.js:22-37](file://app/src/services/api/client.js#L22-L37)
+- [app/src/services/api/client.js:62-76](file://app/src/services/api/client.js#L62-76)
+- [app/src/services/api/client.js:50-57](file://app/src/services/api/client.js#L50-57)
 
 ### 测试页面
-- ApiTest 页面提供对各模型适配器的端到端测试按钮
-- 通过 TaskEngine 提交任务，展示进度与结果，便于验证代理链路
+- **功能保留**：ApiTest 页面提供对各模型适配器的端到端测试按钮
+- **兼容性**：通过 TaskEngine 提交任务，展示进度与结果，便于验证代理链路
 
 **章节来源**
 - [app/src/pages/ApiTest.jsx:86-203](file://app/src/pages/ApiTest.jsx#L86-L203)
 
 ## 依赖关系分析
-- Vite 插件在 vite.config.js 中注册，作为开发服务器中间件生效
-- 插件依赖 Vite 提供的 loadEnv 与 server.middlewares.use
-- 前端通过 axios 统一走 /api 前缀，避免跨域
-- **新增：proxyImageUrl 工具函数被多个组件导入使用**
+**架构变更** - 新的依赖关系图展示了嵌入式服务器和 Vite 插件的双模式支持：
 
 ```mermaid
 graph LR
-VCFG["vite.config.js"] --> PLUG["apiProxyPlugin()"]
-PLUG --> ENV["loadEnv(.env)"]
-PLUG --> MW["server.middlewares.use('/api/*')"]
-FE["axios baseURL='/api'"] --> MW
-CLIENT["client.js<br/>proxyImageUrl()"] --> FE
-MASK["MaskEditor.jsx"] --> CLIENT
-STORAGE["storage.js"] --> CLIENT
-WORKBENCH["Workbench.jsx"] --> CLIENT
+subgraph "Electron 环境"
+MAIN["main.cjs"] --> API_SERVER["api-server.cjs<br/>嵌入式 HTTP 服务器"]
+PRELOAD["preload.cjs"] --> IPC_HANDLERS["ipc-handlers.cjs"]
+CLIENT["client.js<br/>动态 baseURL"] --> API_SERVER
+COMPONENTS["MaskEditor/Storage/Workbench"] --> CLIENT
+end
+subgraph "浏览器开发环境"
+VCFG["vite.config.js"] --> PLUG["apiProxyPlugin()<br/>Vite 插件"]
+FE_CLIENT["client.js<br/>相对路径 /api"] --> PLUG
+end
+API_SERVER --> ENV[".env<br/>dotenv 加载"]
+PLUG --> VENV["Vite loadEnv<br/>开发环境配置"]
 ```
 
 **图表来源**
-- [app/vite.config.js:1-12](file://app/vite.config.js#L1-L12)
-- [app/src/server/api-proxy.js:121-221](file://app/src/server/api-proxy.js#L121-L221)
-- [app/src/services/api/client.js:145-157](file://app/src/services/api/client.js#L145-L157)
-- [app/src/components/MaskEditor.jsx:450-456](file://app/src/components/MaskEditor.jsx#L450-L456)
-- [app/src/services/storage.js:101-116](file://app/src/services/storage.js#L101-L116)
-- [app/src/pages/Workbench.jsx:347-361](file://app/src/pages/Workbench.jsx#L347-L361)
+- [app/electron/main.cjs:96-102](file://app/electron/main.cjs#L96-L102)
+- [app/electron/api-server.cjs:236-247](file://app/electron/api-server.cjs#L236-L247)
+- [app/src/services/api/client.js:22-37](file://app/src/services/api/client.js#L22-L37)
+- [app/vite.config.js:3-7](file://app/vite.config.js#L3-7)
 
 **章节来源**
-- [app/vite.config.js:1-12](file://app/vite.config.js#L1-L12)
-- [app/src/server/api-proxy.js:121-221](file://app/src/server/api-proxy.js#L121-L221)
-- [app/src/services/api/client.js:18-33](file://app/src/services/api/client.js#L18-L33)
+- [app/electron/main.cjs:96-102](file://app/electron/main.cjs#L96-L102)
+- [app/electron/api-server.cjs:236-247](file://app/electron/api-server.cjs#L236-L247)
+- [app/src/services/api/client.js:22-37](file://app/src/services/api/client.js#L22-L37)
+- [app/vite.config.js:3-7](file://app/vite.config.js#L3-7)
 
 ## 性能与可靠性
-- 请求体读取策略兼顾 Vite 内部中间件行为，减少重复解析开销
-- 显式设置 Content-Length，避免上游因分块编码导致的不一致
-- 过滤 content-encoding/content-length 等头，避免浏览器二次解压或长度错误
-- 统一错误处理，将网络/上游异常转换为 502 JSON，便于前端重试与提示
-- 前端提供指数退避重试与可取消请求，提升鲁棒性
-- **CORS 图片代理提供 24 小时缓存控制，显著减少重复请求**
-- **代理端点支持多种图片格式的自动 Content-Type 识别**
+- **请求体处理优化**：嵌入式服务器使用标准流式读取，减少中间件开销
+- **内存管理**：显式设置 Content-Length，避免上游因分块编码导致的不一致
+- **响应头过滤**：过滤 content-encoding/content-length 等头，避免浏览器二次解压或长度错误
+- **统一错误处理**：将网络/上游异常转换为 502 JSON，便于前端重试与提示
+- **前端重试机制**：提供指数退避重试与可取消请求，提升鲁棒性
+- **CORS 图片代理优化**：提供 24 小时缓存控制，显著减少重复请求
+- **端口动态分配**：避免端口冲突，提高部署灵活性
+- **环境自适应**：自动检测运行环境，提供最佳的性能体验
 
 **章节来源**
-- [app/src/server/api-proxy.js:55-116](file://app/src/server/api-proxy.js#L55-L116)
-- [app/src/server/api-proxy.js:203-208](file://app/src/server/api-proxy.js#L203-L208)
-- [app/src/services/api/client.js:38-88](file://app/src/services/api/client.js#L38-L88)
+- [app/electron/api-server.cjs:61-116](file://app/electron/api-server.cjs#L61-L116)
+- [app/electron/api-server.cjs:203-215](file://app/electron/api-server.cjs#L203-L215)
+- [app/src/services/api/client.js:95-113](file://app/src/services/api/client.js#L95-113)
 
 ## 部署指南
 
-### 开发环境
-- 运行脚本：package.json 中 dev 命令启动 Vite 开发服务器
-- 插件在开发模式下启用，/api/* 路由由 Vite 中间件处理
-- 建议将敏感配置放入 .env 文件，并确保不被版本控制
+### Electron 桌面应用部署
+**新架构优势** - 嵌入式服务器完全独立于 Vite 开发服务器：
+
+- **自动启动**：API 服务器在 Electron main 进程启动时自动初始化
+- **端口管理**：系统自动分配可用端口，无需手动配置
+- **环境隔离**：API 服务器与 UI 进程完全分离，提高稳定性
+- **生产就绪**：打包后的应用包含完整的代理服务，无需外部依赖
 
 **章节来源**
-- [app/package.json:6-9](file://app/package.json#L6-L9)
-- [app/vite.config.js:5-11](file://app/vite.config.js#L5-L11)
+- [app/electron/main.cjs:96-102](file://app/electron/main.cjs#L96-L102)
+- [app/electron/api-server.cjs:236-247](file://app/electron/api-server.cjs#L236-L247)
 
-### 生产环境反向代理
-由于当前代理逻辑位于 Vite 开发服务器插件中，生产构建产物不包含该中间件。推荐在生产环境使用 Nginx/Apache/Caddy 等反向代理，将 /api/* 请求转发到后端服务或外部 API。
+### 浏览器开发环境
+**向后兼容** - 保留 Vite 插件模式用于开发调试：
 
-Nginx 示例思路（概念性说明）
-- location /api/qwen/ -> 转发到 Qwen 基础地址，追加原路径
-- location /api/evolink/ -> 转发到 EvoLink 基础地址，追加原路径
-- location /api/oss/ -> 转发到 OSS 域名，追加原路径，并注入必要头
-- location /api/llm/ -> 转发到 LLM 基础地址，追加原路径
-- **location /api/proxy-image/ -> 转发到图片代理服务，处理 CORS 问题**
+- **开发脚本**：package.json 中 dev 命令同时启动 Vite 和 Electron
+- **插件注册**：在 vite.config.js 中注册 apiProxyPlugin
+- **环境变量**：建议使用 .env 文件管理敏感配置
+
+**章节来源**
+- [app/package.json:9-17](file://app/package.json#L9-17)
+- [app/vite.config.js:3-7](file://app/vite.config.js#L3-7)
+
+### 纯 Web 部署
+**架构限制** - 嵌入式 HTTP 服务器仅适用于 Electron 环境：
+
+对于纯 Web 部署场景，需要采用反向代理方案：
+
+Nginx/Apache/Caddy 反向代理配置思路：
+- location /api/qwen/ → 转发到 Qwen 基础地址，追加原路径
+- location /api/evolink/ → 转发到 EvoLink 基础地址，追加原路径  
+- location /api/oss/ → 转发到 OSS 域名，追加原路径，并注入必要头
+- location /api/llm/ → 转发到 LLM 基础地址，追加原路径
+- location /api/proxy-image/ → 转发到图片代理服务，处理 CORS 问题
 - 同时设置合理的超时、缓存与日志
 
 注意
 - 生产环境不应暴露任何密钥到前端
 - 如需在服务端注入鉴权头，应在反向代理层或独立后端服务中完成
-- **CORS 图片代理在生产环境中需要特别注意安全性，建议添加访问控制和速率限制**
+- CORS 图片代理在生产环境中需要特别注意安全性，建议添加访问控制和速率限制
 
 [本节为通用部署指导，未直接分析具体源码文件]
 
 ## 调试与排错
 
 ### 常见问题
-- 401/403 认证失败：检查 .env 中对应 API Key 是否正确
-- 404 路径错误：确认上游基础地址与路径拼接是否正确
-- 502 代理错误：查看服务端控制台日志，定位上游网络或协议问题
-- **图片无法显示：检查 CORS 代理是否正常工作，确认外部图片 URL 可访问**
-- **CORS 错误：确保使用 /api/proxy-image 而非直接访问外部 URL**
+- **401/403 认证失败**：检查 .env 中对应 API Key 是否正确
+- **404 路径错误**：确认上游基础地址与路径拼接是否正确
+- **502 代理错误**：查看服务端控制台日志，定位上游网络或协议问题
+- **图片无法显示**：检查 CORS 代理是否正常工作，确认外部图片 URL 可访问
+- **端口冲突**：Electron 环境使用随机端口，避免手动配置端口冲突
+- **IPC 通信失败**：检查 preload 脚本是否正确暴露 getApiPort 接口
 
 ### 日志与监控
-- 代理层打印了请求方法、目标 URL、请求体大小、响应状态码、Content-Type 与响应体大小，便于快速定位问题
-- **CORS 图片代理特别记录了外部 URL、响应状态、Content-Type 和图片大小**
-- 建议在开发阶段开启更详细的日志，生产环境按需降级
+- **嵌入式服务器日志**：打印请求方法、目标 URL、请求体大小、响应状态码、Content-Type 与响应体大小
+- **CORS 图片代理日志**：特别记录外部 URL、响应状态、Content-Type 和图片大小
+- **IPC 通信日志**：记录端口获取和 API 服务器启动信息
+- **客户端日志**：记录 baseURL 解析和请求重定向过程
 
 **章节来源**
-- [app/src/server/api-proxy.js:55-116](file://app/src/server/api-proxy.js#L55-L116)
-- [app/src/server/api-proxy.js:195-208](file://app/src/server/api-proxy.js#L195-L208)
+- [app/electron/api-server.cjs:62-115](file://app/electron/api-server.cjs#L62-L115)
+- [app/electron/api-server.cjs:202-215](file://app/electron/api-server.cjs#L202-L215)
+- [app/electron/main.cjs:98-102](file://app/electron/main.cjs#L98-L102)
 
 ### 端到端验证
-- 使用 ApiTest 页面点击各模型测试按钮，观察日志与结果面板
-- 结合浏览器开发者工具的网络面板，核对 /api/* 请求是否被正确转发与响应
-- **测试 CORS 代理：直接在浏览器中访问 /api/proxy-image?url=外部图片URL，验证图片能否正常加载**
+- **使用 ApiTest 页面**：点击各模型测试按钮，观察日志与结果面板
+- **检查 Network 面板**：核对 /api/* 请求是否被正确转发与响应
+- **验证端口发现**：在控制台查看 API 服务器端口获取过程
+- **测试 CORS 代理**：直接在浏览器中访问 /api/proxy-image?url=外部图片URL，验证图片能否正常加载
 
 **章节来源**
 - [app/src/pages/ApiTest.jsx:86-203](file://app/src/pages/ApiTest.jsx#L86-L203)
 
 ### CORS 代理调试技巧
-- 检查浏览器控制台是否有跨域错误
-- 验证外部图片 URL 是否可直接访问
-- 确认代理端点返回正确的 Content-Type
-- 检查缓存控制头是否正确设置
-- 使用 Network 面板查看完整的请求响应链
+- **检查浏览器控制台**：是否有跨域错误或端口获取失败警告
+- **验证外部图片 URL**：确认外部图片 URL 是否可直接访问
+- **确认代理端点响应**：检查代理端点返回正确的 Content-Type
+- **检查缓存控制头**：确认 Cache-Control 头是否正确设置
+- **使用 Network 面板**：查看完整的请求响应链和端口信息
+
+### Electron 环境特定调试
+- **检查主进程日志**：查看 API 服务器启动和端口分配信息
+- **验证 IPC 通信**：确认 getApiPort 调用成功返回端口号
+- **检查渲染进程日志**：查看 baseURL 解析和请求重定向过程
+- **端口冲突排查**：确认没有其他进程占用分配的端口
+
+**章节来源**
+- [app/electron/main.cjs:98-102](file://app/electron/main.cjs#L98-L102)
+- [app/src/services/api/client.js:24-34](file://app/src/services/api/client.js#L24-34)
 
 ## 结论
-本代理服务以轻量插件形式嵌入 Vite 开发服务器，集中管理多模型与云服务的前端请求转发，屏蔽跨域与鉴权细节，并提供一致的错误与日志体验。**新增的 CORS 图片代理功能有效解决了外部图片加载的跨域问题，特别是 EvoLink 等服务的安全限制**。对于生产环境，建议采用标准反向代理方案承载 /api/* 路由，保持密钥安全与高可用，并为图片代理端点添加适当的安全措施。
+**重大架构升级**：AI Image Studio 的 API 代理服务已成功从 Vite 插件模式迁移到嵌入式 HTTP 服务器架构，实现了生产环境的独立代理服务。新的架构具有以下优势：
+
+- **环境独立性**：Electron 桌面应用不再依赖 Vite 开发服务器，完全自包含
+- **动态端口管理**：自动发现和分配端口，避免配置复杂性和端口冲突
+- **环境自适应**：客户端智能检测运行环境，提供一致的 API 调用体验
+- **向后兼容**：保留 Vite 插件模式用于浏览器开发环境
+- **统一代理功能**：支持所有现有功能，包括 Qwen、EvoLink、OSS、LLM 和 CORS 图片代理
+
+对于生产环境，嵌入式 HTTP 服务器提供了更好的稳定性和性能。对于开发环境，Vite 插件模式保持了原有的开发体验。这种双模式架构确保了应用在不同部署场景下的最佳表现。
+
+**新增的 CORS 图片代理功能**有效解决了外部图片加载的跨域问题，特别是 EvoLink 等服务的安全限制。通过嵌入式服务器的统一管理，整个代理层的可靠性和可维护性得到了显著提升。

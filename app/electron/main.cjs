@@ -95,7 +95,7 @@ app.whenReady().then(async () => {
 
   // 7. 启动 API 代理服务器
   try {
-    apiServerPort = await startApiServer();
+    apiServerPort = await startApiServer({ fileManager, port: isDev ? 19527 : 0 });
     console.log('[Main] API server started on port', apiServerPort);
   } catch (err) {
     console.error('[Main] Failed to start API server:', err);
