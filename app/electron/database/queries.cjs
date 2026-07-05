@@ -45,6 +45,8 @@ function packImageData(image) {
   // Also capture any extra unknown keys not in the indexed set
   for (const key of Object.keys(image)) {
     if (!IMAGE_INDEXED_COLS.includes(key) && !IMAGE_DATA_FIELDS.includes(key) && key !== 'imageBlob' && key !== 'thumbnailBlob') {
+      // Skip ephemeral blob: URLs — they become stale after page reload
+      if (typeof image[key] === 'string' && image[key].startsWith('blob:')) continue;
       data[key] = image[key];
     }
   }
@@ -68,6 +70,24 @@ function unpackImageRow(row) {
   }
   delete result.data;
   return result;
+}
+
+/**
+ * Sanitise a value before passing to sql.js bind/run.
+ * sql.js only accepts number, string, null, Uint8Array, and bigint.
+ * Any other type (plain objects, arrays, booleans-as-objects, undefined)
+ * is converted to a safe representation to prevent:
+ *   "Wrong API use: tried to bind a value of an unknown type ([object Object])"
+ */
+function safeBindVal(v) {
+  if (v === null || v === undefined) return null;
+  const t = typeof v;
+  if (t === 'number' || t === 'string') return v;
+  if (t === 'boolean') return v ? 1 : 0;
+  if (t === 'bigint') return Number(v);
+  if (v instanceof Uint8Array || v instanceof ArrayBuffer) return v;
+  // Object / Array → JSON string
+  try { return JSON.stringify(v); } catch (_) { return String(v); }
 }
 
 /**
@@ -95,7 +115,7 @@ function buildImageUpdateClauses(changes) {
   for (const [key, value] of Object.entries(changes)) {
     if (IMAGE_INDEXED_COLS.includes(key) && key !== 'id') {
       indexedSets.push(`${key} = ?`);
-      indexedVals.push(key === 'favorite' ? (value ? 1 : 0) : value);
+      indexedVals.push(key === 'favorite' ? (value ? 1 : 0) : safeBindVal(value));
     }
   }
 
@@ -104,6 +124,9 @@ function buildImageUpdateClauses(changes) {
   let hasDataChanges = false;
   for (const [key, value] of Object.entries(changes)) {
     if (!IMAGE_INDEXED_COLS.includes(key) && key !== 'imageBlob' && key !== 'thumbnailBlob') {
+      // Skip blob: URLs — they are ephemeral browser URLs that become stale after page reload.
+      // The http-backend re-creates them on each load from file-system blobs.
+      if (typeof value === 'string' && value.startsWith('blob:')) continue;
       dataChanges[key] = value;
       hasDataChanges = true;
     }
@@ -132,24 +155,24 @@ function addImage(image) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   stmt.run([
-    image.batchId ?? null,
-    image.folderId ?? null,
-    image.model ?? null,
+    safeBindVal(image.batchId),
+    safeBindVal(image.folderId),
+    safeBindVal(image.model),
     image.prompt ?? '',
     image.favorite ? 1 : 0,
     image.status ?? 'completed',
     image.storageZone ?? 'hot',
-    image.filePath ?? null,
-    image.thumbnailPath ?? null,
+    safeBindVal(image.filePath),
+    safeBindVal(image.thumbnailPath),
     image.blobSize ?? 0,
     image.width ?? 0,
     image.height ?? 0,
-    image.sourceUrl ?? null,
-    image.ossUrl ?? null,
-    image.ossKey ?? null,
-    image.taskId ?? null,
+    safeBindVal(image.sourceUrl),
+    safeBindVal(image.ossUrl),
+    safeBindVal(image.ossKey),
+    safeBindVal(image.taskId),
     image.syncStatus ?? 'pending',
-    image.fileHash ?? null,
+    safeBindVal(image.fileHash),
     image.createdAt ?? now,
     dataJson
   ]);
@@ -327,7 +350,7 @@ function addBatch(batch) {
   const stmt = db.prepare(
     'INSERT INTO batches (sessionId, model, prompt, createdAt) VALUES (?, ?, ?, ?)'
   );
-  stmt.run([batch.sessionId ?? null, batch.model ?? '', batch.prompt ?? '', batch.createdAt ?? now]);
+  stmt.run([safeBindVal(batch.sessionId), batch.model ?? '', batch.prompt ?? '', batch.createdAt ?? now]);
   stmt.free();
 
   const idResult = db.exec('SELECT last_insert_rowid() as id');
@@ -381,7 +404,7 @@ function addFolder(folder) {
   const stmt = db.prepare(
     'INSERT INTO folders (name, parentId, createdAt) VALUES (?, ?, ?)'
   );
-  stmt.run([folder.name, folder.parentId ?? null, folder.createdAt ?? now]);
+  stmt.run([folder.name, safeBindVal(folder.parentId), folder.createdAt ?? now]);
   stmt.free();
 
   const idResult = db.exec('SELECT last_insert_rowid() as id');
@@ -403,7 +426,7 @@ function updateFolder(id, changes) {
   for (const [key, value] of Object.entries(changes)) {
     if (['name', 'parentId'].includes(key)) {
       sets.push(`${key} = ?`);
-      vals.push(value);
+      vals.push(safeBindVal(value));
     }
   }
   if (sets.length === 0) return;
@@ -487,7 +510,7 @@ function updateTask(id, changes) {
   for (const [key, value] of Object.entries(changes)) {
     if (TASK_COLS.includes(key) && key !== 'id') {
       indexedSets.push(`${key} = ?`);
-      indexedVals.push(value);
+      indexedVals.push(safeBindVal(value));
     } else if (key !== 'id') {
       dataChanges[key] = value;
       hasDataChanges = true;
@@ -631,7 +654,7 @@ function addCasePackage(pkg) {
   const stmt = db.prepare(
     'INSERT INTO casePackages (imageId, createdAt, data) VALUES (?, ?, ?)'
   );
-  stmt.run([pkg.imageId ?? null, pkg.createdAt ?? now, dataJson]);
+  stmt.run([safeBindVal(pkg.imageId), pkg.createdAt ?? now, dataJson]);
   stmt.free();
 
   const idResult = db.exec('SELECT last_insert_rowid() as id');
@@ -665,7 +688,7 @@ function updateCasePackage(id, changes) {
   for (const [key, value] of Object.entries(changes)) {
     if (PKG_COLS.includes(key) && key !== 'id') {
       indexedSets.push(`${key} = ?`);
-      indexedVals.push(value);
+      indexedVals.push(safeBindVal(value));
     } else if (key !== 'id') {
       dataChanges[key] = value;
       hasDataChanges = true;

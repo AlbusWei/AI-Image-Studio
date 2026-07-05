@@ -27,11 +27,11 @@
 
 ## 更新摘要
 **所做更改**   
-- 新增Buffer优化和API端口注入机制章节，详细说明生产环境下的性能改进
-- 更新缩略图加载优化部分，反映Gallery显示在生产构建中的改进
-- 增强HTTP后端章节，说明Buffer传输优化和二进制数据处理
-- 更新预加载桥接部分，反映同步API端口注入机制
-- 更新详细组件分析，涵盖新的Buffer优化和端口管理功能
+- 新增同步API端口获取机制章节，详细说明preload阶段的零竞态条件端口注入
+- 更新Buffer优化章节，反映ArrayBuffer转换逻辑的简化与性能提升
+- 增强预加载桥接部分，说明同步IPC调用的实现原理
+- 更新API客户端章节，反映生产环境下的直接端口访问优化
+- 更新详细组件分析，涵盖同步IPC调用和Buffer优化的具体实现
 
 ## 目录
 1. [简介](#简介)
@@ -48,7 +48,7 @@
 ## 简介
 本项目是一个基于 Electron + React 的 AI 图像生成工作站，提供多模型统一工作流、提示词工程、批量生成、知识库与全量资产管理能力。主进程负责数据库（SQLite via sql.js）、本地文件系统、REST API服务器、API 代理、自定义协议与 OSS 同步；渲染进程使用 React + Zustand 管理 UI 状态，并通过 IPC 或 HTTP API 安全访问主进程能力。
 
-**更新** 新增了Buffer优化机制、API端口动态注入和缩略图加载优化，显著提升生产环境性能和用户体验。
+**更新** 实现了同步IPC调用机制消除竞态条件，简化了ArrayBuffer转换逻辑提升性能，显著改善了生产环境的稳定性和响应速度。
 
 ## 项目结构
 - 主进程（Electron）
@@ -122,24 +122,24 @@ GAL --> STO
 
 **图表来源** 
 - [main.cjs:1-128](file://app/electron/main.cjs#L1-L128)
-- [preload.cjs:1-82](file://app/electron/preload.cjs#L1-L82)
+- [preload.cjs:1-88](file://app/electron/preload.cjs#L1-L88)
 - [ipc-handlers.cjs:1-63](file://app/electron/ipc-handlers.cjs#L1-L63)
 - [database/index.cjs:1-93](file://app/electron/database/index.cjs#L1-L93)
 - [database/queries.cjs:1-721](file://app/electron/database/queries.cjs#L1-L721)
 - [file-manager.cjs:1-196](file://app/electron/file-manager.cjs#L1-L196)
-- [api-server.cjs:1-606](file://app/electron/api-server.cjs#L1-L606)
+- [api-server.cjs:1-662](file://app/electron/api-server.cjs#L1-L662)
 - [protocol.cjs:1-93](file://app/electron/protocol.cjs#L1-L93)
 - [main.jsx:1-32](file://app/src/main.jsx#L1-L32)
 - [App.jsx:1-364](file://app/src/App.jsx#L1-L364)
 - [database.js:1-114](file://app/src/db/database.js#L1-L114)
-- [http-backend.js:1-345](file://app/src/db/http-backend.js#L1-L345)
+- [http-backend.js:1-383](file://app/src/db/http-backend.js#L1-L383)
 - [electron-backend.js:1-346](file://app/src/db/electron-backend.js#L1-L346)
 - [task-engine.js:1-319](file://app/src/services/task-engine.js#L1-L319)
 - [useTaskStore.js:1-173](file://app/src/stores/useTaskStore.js#L1-L173)
 - [notification.js:1-113](file://app/src/services/notification.js#L1-L113)
 - [client.js:1-193](file://app/src/services/api/client.js#L1-L193)
 - [Gallery.jsx:1-539](file://app/src/pages/Gallery.jsx#L1-L539)
-- [storage.js:1-456](file://app/src/services/storage.js#L1-L456)
+- [storage.js:1-457](file://app/src/services/storage.js#L1-L457)
 
 **章节来源**
 - [main.cjs:1-128](file://app/electron/main.cjs#L1-L128)
@@ -149,7 +149,7 @@ GAL --> STO
 - 主进程入口与初始化流程
   - 注册特权 scheme、初始化 SQLite、注册 IPC、创建 FileManager、注册 app:// 协议、启动 REST API 服务器、初始化 OSS 同步、创建主窗口并监听页面导航与迁移触发。
 - 预加载桥接
-  - 通过 contextBridge 暴露 db/fs/oss/app 等安全接口给渲染进程，所有调用均经 ipcRenderer.invoke 转发到主进程。**新增** 同步API端口注入机制，在页面脚本执行前完成端口获取。
+  - 通过 contextBridge 暴露 db/fs/oss/app 等安全接口给渲染进程，所有调用均经 ipcRenderer.invoke 转发到主进程。**新增** 同步API端口注入机制，在页面脚本执行前完成端口获取，消除竞态条件。
 - 数据库层
   - 主进程侧使用 sql.js 在内存中运行 SQLite，按 300ms 节流写入磁盘；渲染进程通过策略门面自动选择 Dexie（浏览器）、IPC（Electron）或 HTTP（浏览器访问Electron）。**新增** Buffer优化和缩略图预加载机制。
 - 文件系统层
@@ -167,34 +167,34 @@ GAL --> STO
 - **新增** Gallery缩略图优化
   - 智能缩略图加载策略，优先使用blob URL，支持远程URL的CORS代理，提升生产环境显示性能。
 
-**更新** 新增了Buffer优化机制、API端口动态注入和缩略图加载优化，显著提升生产环境性能和用户体验。
+**更新** 实现了同步IPC调用机制消除竞态条件，简化了ArrayBuffer转换逻辑提升性能，显著改善了生产环境的稳定性和响应速度。
 
 **章节来源**
 - [main.cjs:68-128](file://app/electron/main.cjs#L68-L128)
-- [preload.cjs:1-82](file://app/electron/preload.cjs#L1-L82)
+- [preload.cjs:1-88](file://app/electron/preload.cjs#L1-L88)
 - [database/index.cjs:1-93](file://app/electron/database/index.cjs#L1-L93)
 - [database/queries.cjs:1-721](file://app/electron/database/queries.cjs#L1-L721)
 - [database.js:1-114](file://app/src/db/database.js#L1-L114)
-- [http-backend.js:1-345](file://app/src/db/http-backend.js#L1-L345)
+- [http-backend.js:1-383](file://app/src/db/http-backend.js#L1-L383)
 - [electron-backend.js:1-346](file://app/src/db/electron-backend.js#L1-L346)
 - [file-manager.cjs:1-196](file://app/electron/file-manager.cjs#L1-L196)
-- [api-server.cjs:1-606](file://app/electron/api-server.cjs#L1-L606)
+- [api-server.cjs:1-662](file://app/electron/api-server.cjs#L1-L662)
 - [protocol.cjs:1-93](file://app/electron/protocol.cjs#L1-L93)
 - [task-engine.js:1-319](file://app/src/services/task-engine.js#L1-L319)
 - [useTaskStore.js:1-173](file://app/src/stores/useTaskStore.js#L1-L173)
 - [notification.js:1-113](file://app/src/services/notification.js#L1-L113)
 - [client.js:1-193](file://app/src/services/api/client.js#L1-L193)
 - [Gallery.jsx:1-539](file://app/src/pages/Gallery.jsx#L1-L539)
-- [storage.js:1-456](file://app/src/services/storage.js#L1-L456)
+- [storage.js:1-457](file://app/src/services/storage.js#L1-L457)
 
 ## 架构总览
-整体采用"主进程能力 + 渲染进程 UI"的分层架构，新增REST API层支持跨进程通信：**新增** Buffer优化和API端口动态注入机制：
+整体采用"主进程能力 + 渲染进程 UI"的分层架构，新增REST API层支持跨进程通信：**新增** 同步IPC调用和Buffer优化机制：
 - 渲染进程通过预加载桥接访问主进程能力（数据库、文件、OSS、应用信息），或通过HTTP API访问SQLite。
 - 主进程集中管理资源（SQLite、文件系统、REST API、HTTP代理、协议），保证安全与一致性。
 - REST API服务器提供标准化的数据库操作接口，支持浏览器模式下的数据访问。
 - 任务引擎在渲染进程运行，持久化任务状态到数据库，并通过事件驱动更新 UI。
-- **新增** API客户端动态解析端口，支持Electron生产环境的无缝连接。
-- **新增** Gallery智能缩略图加载，优先使用本地缓存，提升显示性能。
+- **新增** 同步API端口获取机制，在preload阶段零竞态条件获取端口号。
+- **新增** 简化的ArrayBuffer转换逻辑，提升二进制数据处理性能。
 
 ```mermaid
 sequenceDiagram
@@ -209,9 +209,9 @@ participant DB as "SQLite(sql.js)<br/>database/index.cjs"
 participant FS as "文件管理器<br/>file-manager.cjs"
 participant Proto as "自定义协议<br/>protocol.cjs"
 participant Client as "API客户端<br/>client.js"
-Note over UI,Client : 生产环境：Buffer优化 + 端口动态注入
-UI->>Bridge : 同步获取API端口
-Bridge->>Main : sendSync('app : getApiPortSync')
+Note over UI,Client : 同步IPC调用 + Buffer优化
+UI->>Bridge : sendSync('app : getApiPortSync')
+Bridge->>Main : 同步获取端口
 Main-->>Bridge : 返回端口号
 Bridge-->>UI : window.__electronApiPort
 UI->>Client : 发起API请求
@@ -222,20 +222,20 @@ DB-->>DBQ : 返回新ID
 DBQ-->>API : 返回结果
 API-->>Client : JSON响应
 Client-->>UI : 解析并返回数据
-Note over UI,Client : 缩略图优化：优先使用blob URL
+Note over UI,Client : 简化的ArrayBuffer转换
 UI->>ELEC : getImages()
 ELEC->>FS : readThumbnail(id)
 FS-->>ELEC : 返回Buffer数据
-ELEC-->>UI : 转换为Blob + createObjectURL
+ELEC-->>UI : Uint8Array优化转换
 ```
 
 **图表来源** 
 - [App.jsx:1-364](file://app/src/App.jsx#L1-L364)
-- [preload.cjs:1-82](file://app/electron/preload.cjs#L1-L82)
-- [http-backend.js:1-345](file://app/src/db/http-backend.js#L1-L345)
+- [preload.cjs:1-88](file://app/electron/preload.cjs#L1-L88)
+- [http-backend.js:1-383](file://app/src/db/http-backend.js#L1-L383)
 - [electron-backend.js:1-346](file://app/src/db/electron-backend.js#L1-L346)
 - [main.cjs:1-128](file://app/electron/main.cjs#L1-L128)
-- [api-server.cjs:1-606](file://app/electron/api-server.cjs#L1-L606)
+- [api-server.cjs:1-662](file://app/electron/api-server.cjs#L1-L662)
 - [database/queries.cjs:1-721](file://app/electron/database/queries.cjs#L1-L721)
 - [database/index.cjs:1-93](file://app/electron/database/index.cjs#L1-L93)
 - [file-manager.cjs:1-196](file://app/electron/file-manager.cjs#L1-L196)
@@ -327,11 +327,11 @@ Preload --> MainIPC : "ipcRenderer.invoke/sendSync"
 ```
 
 **图表来源** 
-- [preload.cjs:1-82](file://app/electron/preload.cjs#L1-L82)
+- [preload.cjs:1-88](file://app/electron/preload.cjs#L1-L88)
 - [ipc-handlers.cjs:1-63](file://app/electron/ipc-handlers.cjs#L1-L63)
 
 **章节来源**
-- [preload.cjs:1-82](file://app/electron/preload.cjs#L1-L82)
+- [preload.cjs:1-88](file://app/electron/preload.cjs#L1-L88)
 - [ipc-handlers.cjs:1-63](file://app/electron/ipc-handlers.cjs#L1-L63)
 
 ### 数据库层（策略门面 + 多后端支持）
@@ -350,7 +350,7 @@ Preload --> MainIPC : "ipcRenderer.invoke/sendSync"
   - 缩略图预加载：getImages时主动加载thumbnailBlob
   - Blob URL缓存：避免重复创建对象URL
 
-**更新** 新增Buffer优化机制和缩略图预加载，提升Electron模式下的性能表现。
+**更新** 新增了简化的ArrayBuffer转换逻辑，提升了Electron模式下的性能表现。
 
 ```mermaid
 flowchart TD
@@ -403,7 +403,7 @@ Open --> Ready["门面可用(db.*)"]
   - Buffer.from(arrayBuffer)高效转换
   - Content-Length精确设置，提升传输效率
 
-**更新** 新增Buffer优化机制，提升二进制数据传输性能。
+**更新** 新增了Buffer优化机制，提升了二进制数据传输性能。
 
 ```mermaid
 sequenceDiagram
@@ -431,7 +431,7 @@ Server-->>Client : { ok : true, size }
 - [database/queries.cjs:122-318](file://app/electron/database/queries.cjs#L122-L318)
 
 **章节来源**
-- [api-server.cjs:1-606](file://app/electron/api-server.cjs#L1-L606)
+- [api-server.cjs:1-662](file://app/electron/api-server.cjs#L1-L662)
 - [database/queries.cjs:1-721](file://app/electron/database/queries.cjs#L1-L721)
 
 ### HTTP 后端（浏览器模式）
@@ -451,7 +451,7 @@ Server-->>Client : { ok : true, size }
   - Uint8Array转换减少内存占用
   - 错误处理和异常恢复机制
 
-**更新** 新增Buffer优化和错误处理机制，提升浏览器模式下的稳定性。
+**更新** 新增了简化的ArrayBuffer转换逻辑，提升了浏览器模式下的稳定性。
 
 ```mermaid
 flowchart TD
@@ -471,7 +471,7 @@ UploadThumb --> ReturnID
 - [http-backend.js:86-103](file://app/src/db/http-backend.js#L86-L103)
 
 **章节来源**
-- [http-backend.js:1-345](file://app/src/db/http-backend.js#L1-L345)
+- [http-backend.js:1-383](file://app/src/db/http-backend.js#L1-L383)
 
 ### 文件系统层（FileManager）
 - 目录组织
@@ -600,9 +600,9 @@ Send --> Response["响应处理"]
 ```
 
 **图表来源** 
-- [client.js:22-37](file://app/src/services/api/client.js#L22-L37)
-- [client.js:62-76](file://app/src/services/api/client.js#L62-L76)
-- [client.js:182-190](file://app/src/services/api/client.js#L182-L190)
+- [client.js:22-37](file://app/src/services/api/client.js#L22-37)
+- [client.js:62-76](file://app/src/services/api/client.js#L62-76)
+- [client.js:182-190](file://app/src/services/api/client.js#L182-190)
 
 **章节来源**
 - [client.js:1-193](file://app/src/services/api/client.js#L1-L193)
@@ -639,7 +639,7 @@ CheckUrl --> |否| Empty["显示空状态"]
 
 **图表来源** 
 - [Gallery.jsx:28-39](file://app/src/pages/Gallery.jsx#L28-L39)
-- [client.js:182-190](file://app/src/services/api/client.js#L182-L190)
+- [client.js:182-190](file://app/src/services/api/client.js#L182-190)
 
 **章节来源**
 - [Gallery.jsx:1-539](file://app/src/pages/Gallery.jsx#L1-L539)
@@ -694,7 +694,7 @@ MainContent --> MaskEditor["MaskEditor"]
   - Gallery.jsx 依赖优化后的缩略图加载机制
   - storage.js 提供缩略图生成和尺寸计算
 
-**更新** 新增API客户端和Gallery优化的依赖关系。
+**更新** 新增了同步IPC调用和Buffer优化的依赖关系。
 
 ```mermaid
 graph TB
@@ -720,18 +720,18 @@ GAL --> STO["services/storage.js"]
 
 **图表来源** 
 - [main.cjs:1-128](file://app/electron/main.cjs#L1-L128)
-- [preload.cjs:1-82](file://app/electron/preload.cjs#L1-L82)
+- [preload.cjs:1-88](file://app/electron/preload.cjs#L1-L88)
 - [ipc-handlers.cjs:1-63](file://app/electron/ipc-handlers.cjs#L1-L63)
 - [database/index.cjs:1-93](file://app/electron/database/index.cjs#L1-L93)
 - [database/queries.cjs:1-721](file://app/electron/database/queries.cjs#L1-L721)
 - [database.js:1-114](file://app/src/db/database.js#L1-L114)
-- [http-backend.js:1-345](file://app/src/db/http-backend.js#L1-L345)
+- [http-backend.js:1-383](file://app/src/db/http-backend.js#L1-L383)
 - [electron-backend.js:1-346](file://app/src/db/electron-backend.js#L1-L346)
 - [task-engine.js:1-319](file://app/src/services/task-engine.js#L1-L319)
 - [useTaskStore.js:1-173](file://app/src/stores/useTaskStore.js#L1-L173)
 - [client.js:1-193](file://app/src/services/api/client.js#L1-L193)
 - [Gallery.jsx:1-539](file://app/src/pages/Gallery.jsx#L1-L539)
-- [storage.js:1-456](file://app/src/services/storage.js#L1-L456)
+- [storage.js:1-457](file://app/src/services/storage.js#L1-L457)
 
 **章节来源**
 - [package.json:1-43](file://app/package.json#L1-L43)
@@ -752,16 +752,16 @@ GAL --> STO["services/storage.js"]
   - 使用Buffer.from和Uint8Array优化二进制数据处理
   - 减少序列化/反序列化开销
   - 精确的Content-Length设置提升传输效率
-- **新增** 端口管理优化
-  - 同步端口获取避免竞态条件
-  - 端口缓存减少重复查询
-  - 动态URL构建提升连接性能
-- **新增** 缩略图加载优化
-  - 优先使用blob URL避免网络请求
-  - 缩略图预加载提升首屏显示速度
-  - 智能降级策略确保用户体验
+- **新增** 同步IPC调用优化
+  - 使用sendSync消除竞态条件
+  - 端口预加载避免运行时查询
+  - 零延迟的端口获取机制
+- **新增** ArrayBuffer转换优化
+  - 简化的类型检查逻辑
+  - 减少不必要的内存拷贝
+  - 提升二进制数据处理性能
 
-**更新** 新增Buffer优化、端口管理和缩略图加载的性能优化考虑。
+**更新** 新增了同步IPC调用和Buffer优化的性能考虑，显著提升了应用的响应速度和稳定性。
 
 ## 故障排查指南
 - 数据库初始化失败
@@ -777,20 +777,20 @@ GAL --> STO["services/storage.js"]
   - 确认图片 ID 与扩展名正确；检查路径遍历拦截与文件是否存在
 - 任务无法完成
   - 查看任务状态与错误信息；确认重试次数与退避策略；检查网络错误分类逻辑
-- **新增** API端口相关问题
-  - 检查window.__electronApiPort是否正确注入
-  - 确认preload阶段的sendSync调用是否成功
-  - 验证Electron生产环境下的端口动态解析
-- **新增** Buffer传输问题
-  - 检查二进制数据的Buffer.from转换是否正确
-  - 确认Content-Type和Content-Length设置
-  - 验证IPC传输中的Buffer序列化/反序列化
-- **新增** 缩略图加载问题
-  - 检查gallery页面的getImageDisplayUrl逻辑
-  - 确认CORS代理配置和远程URL处理
-  - 验证blob URL的生命周期管理
+- **新增** 同步IPC调用问题
+  - 检查preload阶段的sendSync调用是否成功
+  - 确认window.__electronApiPort是否正确注入
+  - 验证主进程中的app:getApiPortSync处理器是否注册
+- **新增** Buffer转换问题
+  - 检查ArrayBuffer转换逻辑的类型判断
+  - 确认Uint8Array和ArrayBuffer的正确使用
+  - 验证二进制数据的完整性
+- **新增** 端口相关问题
+  - 检查生产环境下的端口动态分配
+  - 确认API服务器的启动状态
+  - 验证Electron IPC通道的可用性
 
-**更新** 新增API端口、Buffer传输和缩略图加载的故障排查指南。
+**更新** 新增了同步IPC调用、Buffer转换和端口管理的故障排查指南。
 
 **章节来源**
 - [database/index.cjs:66-93](file://app/electron/database/index.cjs#L66-L93)
@@ -799,13 +799,13 @@ GAL --> STO["services/storage.js"]
 - [protocol.cjs:48-68](file://app/electron/protocol.cjs#L48-L68)
 - [task-engine.js:259-305](file://app/src/services/task-engine.js#L259-L305)
 - [preload.cjs:3-7](file://app/electron/preload.cjs#L3-L7)
-- [client.js:22-37](file://app/src/services/api/client.js#L22-L37)
+- [client.js:22-37](file://app/src/services/api/client.js#L22-37)
 - [Gallery.jsx:28-39](file://app/src/pages/Gallery.jsx#L28-L39)
 
 ## 结论
 该架构以主进程为中心，集中管理敏感资源与外部服务，渲染进程专注于 UI 与交互。通过预加载桥接与策略门面，既保证了安全性，又提升了跨环境兼容性。新增的REST API服务器提供了标准化的数据库访问接口，支持浏览器模式下的SQLite访问。任务引擎与通知机制增强了用户体验，API 代理简化了多模型接入。整体设计清晰、可扩展性强，适合持续迭代与功能扩展。
 
-**更新** 新增的Buffer优化机制、API端口动态注入和缩略图加载优化显著提升了生产环境性能和用户体验，使应用更加稳定和高效。
+**更新** 实现的同步IPC调用机制消除了竞态条件，简化的ArrayBuffer转换逻辑提升了性能，显著改善了生产环境的稳定性和响应速度，使应用更加可靠和高效。
 
 ## 附录
 - 开发脚本
@@ -816,19 +816,19 @@ GAL --> STO["services/storage.js"]
   - base 设置为相对路径，适配 Electron 本地加载
   - 启用 api-proxy 插件用于开发期代理
   - Vite代理配置：/api/db → http://127.0.0.1:19527
-- **新增** 端口管理配置
-  - 开发环境固定端口19527
-  - 生产环境随机端口，通过IPC同步获取
-  - 支持Electron和浏览器环境的无缝切换
+- **新增** 同步IPC调用配置
+  - 使用sendSync进行端口获取，消除竞态条件
+  - 在preload阶段完成端口注入
+  - 支持零延迟的应用启动
 - **新增** Buffer优化配置
   - 使用Node.js原生Buffer类优化二进制处理
   - 配置适当的Content-Type和Content-Length
   - 优化IPC传输中的Buffer序列化
 
-**更新** 新增端口管理和Buffer优化的配置说明。
+**更新** 新增了同步IPC调用和Buffer优化的配置说明。
 
 **章节来源**
 - [package.json:9-17](file://app/package.json#L9-L17)
 - [vite.config.js:1-20](file://app/vite.config.js#L1-L20)
 - [main.cjs:94-104](file://app/electron/main.cjs#L94-L104)
-- [client.js:22-37](file://app/src/services/api/client.js#L22-L37)
+- [client.js:22-37](file://app/src/services/api/client.js#L22-37)

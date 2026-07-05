@@ -18,10 +18,10 @@
 
 ## 更新摘要
 **变更内容**
-- 修复了Electron模式下图片显示的关键问题，增强了缩略图加载机制
-- 改进了生产构建环境下的URL解析逻辑，确保CORS代理正常工作
-- 优化了Electron IPC通信中的API端口检测与传递机制
-- 完善了数据库后端在Electron模式下的缩略图处理流程
+- 增强了缩略图生成管道，添加了自动回退机制确保图片加载的可靠性
+- 改进了图片URL解析逻辑，同时支持url和sourceUrl属性，提升兼容性
+- 优化了Electron IPC通信中的API端口访问机制，消除竞态条件
+- 完善了数据库后端在Electron模式下的缩略图处理流程，支持文件系统持久化
 
 ## 目录
 1. [简介](#简介)
@@ -43,7 +43,7 @@
 - 收藏系统、标签管理与存储区域切换的实现细节
 - 文件上传处理、拖拽排序、右键菜单操作和用户偏好设置的数据持久化方案
 - 图片预览、下载和删除操作的完整工作流说明
-- **新增**：Electron模式下图片显示问题的修复与URL解析优化
+- **新增**：增强的缩略图生成管道与Electron环境下的URL解析优化
 
 ## 项目结构
 图库功能由以下关键模块协作完成：
@@ -53,7 +53,7 @@
 - 展示层：Lightbox 提供全屏预览、缩放、备注、移动、加入知识库等操作
 - 全局 UI：useUIStore 管理 Lightbox、通知、遮罩编辑器开关等
 - 生成联动：useGenerationStore 提供从图库回到工作区继续生成的上下文注入
-- **新增**：Electron IPC 桥接层，支持SQLite数据库访问和文件系统操作
+- **增强**：Electron IPC 桥接层，支持SQLite数据库访问和文件系统操作，具备自动回退机制
 
 ```mermaid
 graph TB
@@ -94,29 +94,29 @@ PRE --> API
 
 **图表来源**
 - [app/src/pages/Gallery.jsx:1-539](file://app/src/pages/Gallery.jsx#L1-L539)
-- [app/src/components/Lightbox.jsx:1-702](file://app/src/components/Lightbox.jsx#L1-L702)
+- [app/src/components/Lightbox.jsx:1-714](file://app/src/components/Lightbox.jsx#L1-L714)
 - [app/src/stores/useGalleryStore.js:1-224](file://app/src/stores/useGalleryStore.js#L1-L224)
 - [app/src/stores/useUIStore.js:1-159](file://app/src/stores/useUIStore.js#L1-L159)
 - [app/src/stores/useGenerationStore.js:1-360](file://app/src/stores/useGenerationStore.js#L1-L360)
 - [app/src/db/database.js:1-114](file://app/src/db/database.js#L1-L114)
-- [app/src/services/storage.js:1-456](file://app/src/services/storage.js#L1-L456)
+- [app/src/services/storage.js:1-457](file://app/src/services/storage.js#L1-L457)
 - [app/src/stores/useSettingsStore.js:1-162](file://app/src/stores/useSettingsStore.js#L1-L162)
 - [app/src/db/electron-backend.js:1-346](file://app/src/db/electron-backend.js#L1-L346)
 - [app/electron/preload.cjs:1-88](file://app/electron/preload.cjs#L1-L88)
-- [app/electron/api-server.cjs:1-606](file://app/electron/api-server.cjs#L1-L606)
+- [app/electron/api-server.cjs:1-662](file://app/electron/api-server.cjs#L1-L662)
 
 **章节来源**
 - [app/src/pages/Gallery.jsx:1-539](file://app/src/pages/Gallery.jsx#L1-L539)
 - [app/src/stores/useGalleryStore.js:1-224](file://app/src/stores/useGalleryStore.js#L1-L224)
-- [app/src/components/Lightbox.jsx:1-702](file://app/src/components/Lightbox.jsx#L1-L702)
+- [app/src/components/Lightbox.jsx:1-714](file://app/src/components/Lightbox.jsx#L1-L714)
 - [app/src/db/database.js:1-114](file://app/src/db/database.js#L1-L114)
-- [app/src/services/storage.js:1-456](file://app/src/services/storage.js#L1-L456)
+- [app/src/services/storage.js:1-457](file://app/src/services/storage.js#L1-L457)
 - [app/src/stores/useSettingsStore.js:1-162](file://app/src/stores/useSettingsStore.js#L1-L162)
 - [app/src/stores/useUIStore.js:1-159](file://app/src/stores/useUIStore.js#L1-L159)
 - [app/src/stores/useGenerationStore.js:1-360](file://app/src/stores/useGenerationStore.js#L1-L360)
 - [app/src/db/electron-backend.js:1-346](file://app/src/db/electron-backend.js#L1-L346)
 - [app/electron/preload.cjs:1-88](file://app/electron/preload.cjs#L1-L88)
-- [app/electron/api-server.cjs:1-606](file://app/electron/api-server.cjs#L1-L606)
+- [app/electron/api-server.cjs:1-662](file://app/electron/api-server.cjs#L1-L662)
 
 ## 核心组件
 - Gallery 页面
@@ -145,26 +145,26 @@ PRE --> API
   - 侧边栏、Lightbox、任务面板、Toast、主题、遮罩编辑器开关
 - useGenerationStore 生成联动
   - 将图库图片的参数注入工作区，支持"用相同参数再来一批"、"以此图为参考图"、"微调 prompt 再生成"
-- **新增**：Electron IPC 桥接层
-  - preload.cjs 暴露安全的 IPC 接口给 renderer 进程
-  - electron-backend.js 实现 SQLite 数据库访问
-  - api-server.cjs 提供内嵌 HTTP 代理服务器
+- **增强**：Electron IPC 桥接层
+  - preload.cjs 同步注入API端口到window.__electronApiPort，避免竞态条件
+  - electron-backend.js 实现 SQLite 数据库访问，支持文件系统持久化
+  - api-server.cjs 提供内嵌 HTTP 代理服务器，包含CORS代理功能
 
 **章节来源**
 - [app/src/pages/Gallery.jsx:1-539](file://app/src/pages/Gallery.jsx#L1-L539)
-- [app/src/components/Lightbox.jsx:1-702](file://app/src/components/Lightbox.jsx#L1-L702)
+- [app/src/components/Lightbox.jsx:1-714](file://app/src/components/Lightbox.jsx#L1-L714)
 - [app/src/stores/useGalleryStore.js:1-224](file://app/src/stores/useGalleryStore.js#L1-L224)
 - [app/src/db/database.js:1-114](file://app/src/db/database.js#L1-L114)
-- [app/src/services/storage.js:1-456](file://app/src/services/storage.js#L1-L456)
+- [app/src/services/storage.js:1-457](file://app/src/services/storage.js#L1-L457)
 - [app/src/stores/useSettingsStore.js:1-162](file://app/src/stores/useSettingsStore.js#L1-L162)
 - [app/src/stores/useUIStore.js:1-159](file://app/src/stores/useUIStore.js#L1-L159)
 - [app/src/stores/useGenerationStore.js:1-360](file://app/src/stores/useGenerationStore.js#L1-L360)
 - [app/electron/preload.cjs:1-88](file://app/electron/preload.cjs#L1-L88)
 - [app/src/db/electron-backend.js:1-346](file://app/src/db/electron-backend.js#L1-L346)
-- [app/electron/api-server.cjs:1-606](file://app/electron/api-server.cjs#L1-L606)
+- [app/electron/api-server.cjs:1-662](file://app/electron/api-server.cjs#L1-L662)
 
 ## 架构总览
-下图展示了图库页面的端到端流程：用户交互触发状态变更，状态层调用数据库或存储服务，最终驱动 UI 更新。**新增**了Electron IPC通信路径。
+下图展示了图库页面的端到端流程：用户交互触发状态变更，状态层调用数据库或存储服务，最终驱动 UI 更新。**增强**了Electron IPC通信路径和缩略图回退机制。
 
 ```mermaid
 sequenceDiagram
@@ -197,17 +197,19 @@ ST->>A : proxyImageUrl() 通过CORS代理
 A-->>ST : 返回图片数据
 ST-->>L : Blob/OSS URL
 L-->>U : 预览/下载/移动成功反馈
+Note over E,P : 同步注入API端口，消除竞态条件
+Note over ST,A : 增强的缩略图回退机制
 ```
 
 **图表来源**
 - [app/src/pages/Gallery.jsx:1-539](file://app/src/pages/Gallery.jsx#L1-L539)
 - [app/src/stores/useGalleryStore.js:1-224](file://app/src/stores/useGalleryStore.js#L1-L224)
-- [app/src/components/Lightbox.jsx:1-702](file://app/src/components/Lightbox.jsx#L1-L702)
+- [app/src/components/Lightbox.jsx:1-714](file://app/src/components/Lightbox.jsx#L1-L714)
 - [app/src/db/database.js:1-114](file://app/src/db/database.js#L1-L114)
-- [app/src/services/storage.js:1-456](file://app/src/services/storage.js#L1-L456)
+- [app/src/services/storage.js:1-457](file://app/src/services/storage.js#L1-L457)
 - [app/src/db/electron-backend.js:1-346](file://app/src/db/electron-backend.js#L1-L346)
 - [app/electron/preload.cjs:1-88](file://app/electron/preload.cjs#L1-L88)
-- [app/electron/api-server.cjs:1-606](file://app/electron/api-server.cjs#L1-L606)
+- [app/electron/api-server.cjs:1-662](file://app/electron/api-server.cjs#L1-L662)
 
 ## 详细组件分析
 
@@ -224,10 +226,11 @@ L-->>U : 预览/下载/移动成功反馈
   - 网格模式使用 CSS Grid 自适应列数，列表模式为单行卡片
   - 图片优先使用 thumbnailUrl，其次 blobUrl/url
   - 导入时通过 Canvas 生成缩略图并保存
-- **新增**：Electron模式URL解析优化
+- **增强**：Electron模式URL解析优化
   - `getImageDisplayUrl` 函数增强了对Electron环境的识别
   - 通过 `proxyImageUrl` 正确处理CORS代理URL
   - 支持blob URL、data URL和远程URL的统一处理
+  - 同时支持 url 和 sourceUrl 属性，提升兼容性
 - 收藏系统与标签
   - 收藏通过 toggleFavorite 同步到数据库并即时更新本地状态
   - 标签字段 tags 存在于图片记录中，但当前 UI 未暴露编辑入口
@@ -273,10 +276,11 @@ Scroll --> |否| End(["等待交互"])
   - moveImages/deleteImages：批量更新/删除，并清理 selectedImages
   - batchAction：统一分发 favorite/move/delete 等批量操作
   - setCurrentFolder：切换当前文件夹并重置选择
-- **新增**：Blob URL重建机制
+- **增强**：Blob URL重建机制
   - 页面刷新后自动重建有效的blob URL
   - 处理跨会话的blob URL失效问题
   - 确保Electron模式下缩略图正确加载
+  - 支持thumbnailBlob的自动处理和URL生成
 - 复杂度与一致性
   - 使用 immer produce 进行不可变更新，保证响应式
   - 批量操作顺序执行，避免并发竞争
@@ -328,6 +332,10 @@ GalleryStore --> Database : "读写"
   - 下载优先从热区 Blob 获取，若不存在则回退提示错误
   - 移动到文件夹通过 updateImage 更新 folderId
   - 加入知识库通过 addCasePackage 保存案例包
+- **增强**：图片URL解析优化
+  - 支持多种图片源格式（blobUrl、thumbnailUrl、url、sourceUrl）
+  - 自动处理Electron环境下的CORS代理
+  - 完善的错误处理和回退机制
 
 ```mermaid
 sequenceDiagram
@@ -352,24 +360,26 @@ DB-->>LB : 成功
 - [app/src/services/storage.js:87-97](file://app/src/services/storage.js#L87-L97)
 
 **章节来源**
-- [app/src/components/Lightbox.jsx:1-702](file://app/src/components/Lightbox.jsx#L1-L702)
+- [app/src/components/Lightbox.jsx:1-714](file://app/src/components/Lightbox.jsx#L1-L714)
 - [app/src/db/database.js:1-114](file://app/src/db/database.js#L1-L114)
-- [app/src/services/storage.js:1-456](file://app/src/services/storage.js#L1-L456)
+- [app/src/services/storage.js:1-457](file://app/src/services/storage.js#L1-L457)
 
 ### Electron IPC 桥接层
-- **新增**：preload.cjs 安全桥接
+- **增强**：preload.cjs 安全桥接
   - 同步注入API端口到window.__electronApiPort，避免竞态条件
   - 暴露安全的IPC接口给renderer进程，包括数据库操作、文件系统操作、OSS同步等
   - 支持30个数据库操作函数的IPC调用
-- **新增**：electron-backend.js SQLite后端
+- **增强**：electron-backend.js SQLite后端
   - 实现与Dexie后端完全兼容的接口
   - 处理Blob到ArrayBuffer的转换，支持IPC传输
   - 自动加载缩略图文件并创建blob URL
   - 支持图片文件的读写和删除操作
-- **新增**：api-server.cjs 内嵌HTTP服务器
+  - 增强的缩略图回退机制，确保图片正常显示
+- **增强**：api-server.cjs 内嵌HTTP服务器
   - 提供/api/proxy-image路由处理外部图片CORS请求
   - 支持动态端口分配和生产环境部署
   - 集成数据库REST API和图片代理服务
+  - 完善的错误处理和日志记录
 
 ```mermaid
 flowchart TD
@@ -384,12 +394,12 @@ RESP --> IMG["图片显示"]
 **图表来源**
 - [app/electron/preload.cjs:3-7](file://app/electron/preload.cjs#L3-L7)
 - [app/src/services/api/client.js:182-190](file://app/src/services/api/client.js#L182-L190)
-- [app/electron/api-server.cjs:523-555](file://app/electron/api-server.cjs#L523-L555)
+- [app/electron/api-server.cjs:580-611](file://app/electron/api-server.cjs#L580-L611)
 
 **章节来源**
 - [app/electron/preload.cjs:1-88](file://app/electron/preload.cjs#L1-L88)
 - [app/src/db/electron-backend.js:1-346](file://app/src/db/electron-backend.js#L1-L346)
-- [app/electron/api-server.cjs:1-606](file://app/electron/api-server.cjs#L1-L606)
+- [app/electron/api-server.cjs:1-662](file://app/electron/api-server.cjs#L1-L662)
 
 ### 存储与缩略图策略
 - 热区（IndexedDB）
@@ -400,12 +410,14 @@ RESP --> IMG["图片显示"]
   - moveToColdZone 会将热区 Blob 上传后释放本地引用，降低内存占用
 - 缩略图生成
   - 使用 Canvas 将原图按比例缩放至最大维度（默认 200px），再转 Blob 保存
+  - **增强**：添加了完善的错误处理和回退机制
 - 容量检查与自动迁移
   - checkAndMigrate 依据阈值（来自设置）将最旧的热区图片迁移到冷区，直到低于阈值
-- **新增**：Electron模式缩略图优化
+- **增强**：Electron模式缩略图优化
   - electron-backend.js 自动从文件系统加载缩略图
   - 创建有效的blob URL供前端直接使用
   - 处理缩略图文件缺失的异常情况
+  - 支持thumbnailBlob的自动处理和URL生成
 
 ```mermaid
 flowchart TD
@@ -417,15 +429,18 @@ E --> F["Electron模式：文件系统持久化"]
 F --> G["readThumbnail 自动加载"]
 G --> H["创建blob URL"]
 H --> I["前端直接显示"]
+I --> J{"显示成功?"}
+J --> |否| K["回退到原始URL"]
+J --> |是| L["正常显示"]
 ```
 
 **图表来源**
 - [app/src/services/storage.js:51-80](file://app/src/services/storage.js#L51-L80)
-- [app/src/services/storage.js:323-347](file://app/src/services/storage.js#L323-L347)
+- [app/src/services/storage.js:387-411](file://app/src/services/storage.js#L387-L411)
 - [app/src/db/electron-backend.js:87-103](file://app/src/db/electron-backend.js#L87-L103)
 
 **章节来源**
-- [app/src/services/storage.js:1-456](file://app/src/services/storage.js#L1-L456)
+- [app/src/services/storage.js:1-457](file://app/src/services/storage.js#L1-L457)
 - [app/src/stores/useSettingsStore.js:1-162](file://app/src/stores/useSettingsStore.js#L1-L162)
 - [app/src/db/electron-backend.js:1-346](file://app/src/db/electron-backend.js#L1-L346)
 
@@ -482,7 +497,7 @@ GEN-->>G : 开始生成并反馈
 
 **图表来源**
 - [app/src/pages/Gallery.jsx:272-285](file://app/src/pages/Gallery.jsx#L272-L285)
-- [app/src/stores/useGenerationStore.js:112-290](file://app/src/stores/useGenerationStore.js#L112-L290)
+- [app/src/stores/useGenerationStore.js:112-290](file://app/src/stores/useGenerationStore.js#L112-290)
 
 **章节来源**
 - [app/src/pages/Gallery.jsx:1-539](file://app/src/pages/Gallery.jsx#L1-L539)
@@ -496,7 +511,7 @@ GEN-->>G : 开始生成并反馈
   - Dexie（IndexedDB 封装）
   - ali-oss（云存储 SDK）
   - lucide-react（图标）
-- **新增**：Electron依赖
+- **增强**：Electron依赖
   - electron（主进程框架）
   - sqlite3（SQLite数据库）
   - http（内置HTTP服务器）
@@ -522,29 +537,29 @@ PRE --> API["api-server.cjs"]
 
 **图表来源**
 - [app/src/pages/Gallery.jsx:1-539](file://app/src/pages/Gallery.jsx#L1-L539)
-- [app/src/components/Lightbox.jsx:1-702](file://app/src/components/Lightbox.jsx#L1-L702)
+- [app/src/components/Lightbox.jsx:1-714](file://app/src/components/Lightbox.jsx#L1-L714)
 - [app/src/stores/useGalleryStore.js:1-224](file://app/src/stores/useGalleryStore.js#L1-L224)
 - [app/src/stores/useUIStore.js:1-159](file://app/src/stores/useUIStore.js#L1-L159)
 - [app/src/stores/useGenerationStore.js:1-360](file://app/src/stores/useGenerationStore.js#L1-L360)
 - [app/src/db/database.js:1-114](file://app/src/db/database.js#L1-L114)
-- [app/src/services/storage.js:1-456](file://app/src/services/storage.js#L1-L456)
+- [app/src/services/storage.js:1-457](file://app/src/services/storage.js#L1-L457)
 - [app/src/stores/useSettingsStore.js:1-162](file://app/src/stores/useSettingsStore.js#L1-L162)
 - [app/src/db/electron-backend.js:1-346](file://app/src/db/electron-backend.js#L1-L346)
 - [app/electron/preload.cjs:1-88](file://app/electron/preload.cjs#L1-L88)
-- [app/electron/api-server.cjs:1-606](file://app/electron/api-server.cjs#L1-L606)
+- [app/electron/api-server.cjs:1-662](file://app/electron/api-server.cjs#L1-L662)
 
 **章节来源**
 - [app/src/pages/Gallery.jsx:1-539](file://app/src/pages/Gallery.jsx#L1-L539)
-- [app/src/components/Lightbox.jsx:1-702](file://app/src/components/Lightbox.jsx#L1-L702)
+- [app/src/components/Lightbox.jsx:1-714](file://app/src/components/Lightbox.jsx#L1-L714)
 - [app/src/stores/useGalleryStore.js:1-224](file://app/src/stores/useGalleryStore.js#L1-L224)
 - [app/src/stores/useUIStore.js:1-159](file://app/src/stores/useUIStore.js#L1-L159)
 - [app/src/stores/useGenerationStore.js:1-360](file://app/src/stores/useGenerationStore.js#L1-L360)
 - [app/src/db/database.js:1-114](file://app/src/db/database.js#L1-L114)
-- [app/src/services/storage.js:1-456](file://app/src/services/storage.js#L1-L456)
+- [app/src/services/storage.js:1-457](file://app/src/services/storage.js#L1-L457)
 - [app/src/stores/useSettingsStore.js:1-162](file://app/src/stores/useSettingsStore.js#L1-L162)
 - [app/src/db/electron-backend.js:1-346](file://app/src/db/electron-backend.js#L1-L346)
 - [app/electron/preload.cjs:1-88](file://app/electron/preload.cjs#L1-L88)
-- [app/electron/api-server.cjs:1-606](file://app/electron/api-server.cjs#L1-L606)
+- [app/electron/api-server.cjs:1-662](file://app/electron/api-server.cjs#L1-L662)
 
 ## 性能与优化
 - 虚拟滚动与懒加载
@@ -552,6 +567,7 @@ PRE --> API["api-server.cjs"]
   - 建议：对超大数据集引入 react-window 或 react-virtualized，减少 DOM 节点数量
 - 缩略图与图片加载
   - 导入时生成缩略图，列表/网格优先使用 thumbnailUrl，减少大图渲染开销
+  - **增强**：添加了完善的错误处理和回退机制，确保图片加载的可靠性
   - 建议：结合 IntersectionObserver 实现按需加载，避免一次性加载过多图片
 - 批量下载节流
   - 批量导出已做简单延时（200ms）避免浏览器拦截
@@ -562,10 +578,11 @@ PRE --> API["api-server.cjs"]
 - 渲染优化
   - 使用 useMemo 缓存过滤与分组结果，避免重复计算
   - 建议：对大数组进一步拆分渲染单元（如分组内分页）
-- **新增**：Electron模式性能优化
+- **增强**：Electron模式性能优化
   - 预加载API端口避免运行时检测开销
   - 缩略图文件直接从磁盘读取，避免IPC传输开销
   - 使用http.createServer提供高性能图片代理服务
+  - 增强的缩略图回退机制减少网络请求失败的影响
 
 [本节为通用性能建议，无需特定文件来源]
 
@@ -590,14 +607,21 @@ PRE --> API["api-server.cjs"]
   - 现象：关键词搜索为空
   - 排查：确认 searchImages 是否命中 prompt/model/tags；检查索引与大小写
   - 相关位置：searchImages 实现
-- **新增**：Electron模式图片显示问题
+- **增强**：Electron模式图片显示问题
   - 现象：Electron环境下图片无法显示或缩略图加载失败
   - 排查：检查window.__electronApiPort是否正确注入、API服务器是否正常启动
+  - 排查：验证缩略图文件是否存在于文件系统
   - 相关位置：preload.cjs、api-server.cjs、electron-backend.js
-- **新增**：CORS代理问题
+- **增强**：CORS代理问题
   - 现象：外部图片无法通过代理加载
   - 排查：检查/api/proxy-image路由是否正确配置、目标URL是否有效
+  - 排查：验证Electron环境下的API端口配置
   - 相关位置：client.js proxyImageUrl函数、api-server.cjs代理路由
+- **新增**：URL解析兼容性问题
+  - 现象：某些图片无法正确显示
+  - 排查：检查图片记录是否包含正确的url或sourceUrl字段
+  - 排查：验证Electron环境下的URL重写逻辑
+  - 相关位置：Gallery.jsx getImageDisplayUrl函数、Lightbox.jsx getImageDisplayUrl函数
 
 **章节来源**
 - [app/src/pages/Gallery.jsx:160-240](file://app/src/pages/Gallery.jsx#L160-L240)
@@ -606,11 +630,11 @@ PRE --> API["api-server.cjs"]
 - [app/src/db/database.js:56](file://app/src/db/database.js#L56)
 - [app/src/services/storage.js:108-151](file://app/src/services/storage.js#L108-L151)
 - [app/electron/preload.cjs:3-7](file://app/electron/preload.cjs#L3-L7)
-- [app/electron/api-server.cjs:523-555](file://app/electron/api-server.cjs#L523-L555)
+- [app/electron/api-server.cjs:580-611](file://app/electron/api-server.cjs#L580-L611)
 - [app/src/services/api/client.js:182-190](file://app/src/services/api/client.js#L182-L190)
 
 ## 结论
-图库页面围绕 Gallery 组件构建了完整的图片浏览、搜索、筛选、分组、批量操作与预览体系，并通过 useGalleryStore 与 database.js、storage.js 形成清晰的数据流。**本次更新重点修复了Electron模式下的图片显示问题**，通过增强缩略图加载机制和优化URL解析逻辑，确保了生产构建环境下的稳定运行。当前实现已满足日常使用需求，后续可在虚拟滚动、按需加载、标签编辑、拖拽排序与设置持久化方面进一步增强体验与性能。
+图库页面围绕 Gallery 组件构建了完整的图片浏览、搜索、筛选、分组、批量操作与预览体系，并通过 useGalleryStore 与 database.js、storage.js 形成清晰的数据流。**本次更新重点增强了缩略图生成管道的可靠性和Electron环境下的兼容性**，通过添加自动回退机制、优化URL解析逻辑和支持多种图片源格式，确保了生产构建环境下的稳定运行。当前的改进显著提升了用户体验，特别是在网络不稳定或Electron环境下的表现。后续可在虚拟滚动、按需加载、标签编辑、拖拽排序与设置持久化方面进一步增强体验与性能。
 
 [本节为总结性内容，无需特定文件来源]
 
@@ -622,12 +646,18 @@ PRE --> API["api-server.cjs"]
   - images 表包含：id、folderId、model、prompt、url、thumbnailUrl、params、favorite、storageZone、createdAt、width、height、tags、status 等
   - folders 表：id、name、parentId、createdAt
   - casePackages 表：imageId、originalPrompt、model、params、annotation、tags、imageUrl、createdAt
-- **新增**：Electron环境变量
-  - window.__electronApiPort：API服务器端口号
+- **增强**：Electron环境变量
+  - window.__electronApiPort：API服务器端口号（同步注入）
   - window.electronAPI：IPC接口对象
   - 支持30个数据库操作和文件系统操作
+- **新增**：图片URL解析优先级
+  - blobUrl > thumbnailUrl(blob) > url/sourceUrl > 原始URL
+  - 支持Electron环境下的CORS代理自动处理
+  - 完善的错误处理和回退机制
 
 **章节来源**
 - [app/src/db/database.js:22-31](file://app/src/db/database.js#L22-L31)
 - [app/src/components/Lightbox.jsx:141-165](file://app/src/components/Lightbox.jsx#L141-L165)
 - [app/electron/preload.cjs:10-87](file://app/electron/preload.cjs#L10-L87)
+- [app/src/pages/Gallery.jsx:28-39](file://app/src/pages/Gallery.jsx#L28-L39)
+- [app/src/components/Lightbox.jsx:14-21](file://app/src/components/Lightbox.jsx#L14-L21)

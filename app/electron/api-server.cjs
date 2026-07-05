@@ -188,6 +188,18 @@ function extractIdFromPath(path, prefix) {
  * @param {object} fileManager - FileManager 实例
  * @returns {function} handleDbRequest 函数
  */
+/**
+ * 从图片行中清理 blob: URL。
+ * blob: URL 是浏览器内存中的临时 URL，跨会话无效。
+ * 持久化到 SQLite data JSON 列后会在下次加载时返回过期 URL，
+ * 导致 http-backend 误以为已有有效缩略图而跳过加载。
+ */
+function sanitizeImageRow(row) {
+  if (row.blobUrl && row.blobUrl.startsWith('blob:')) delete row.blobUrl;
+  if (row.thumbnailUrl && row.thumbnailUrl.startsWith('blob:')) delete row.thumbnailUrl;
+  return row;
+}
+
 function createDbRouter(queries, fileManager) {
 
   async function handleDbRequest(req, res) {
@@ -234,6 +246,7 @@ function createDbRouter(queries, fileManager) {
         if (isNaN(id)) return sendJson(res, { error: 'Invalid id' }, 400);
         const row = queries.getImage(id);
         if (!row) return sendJson(res, { error: 'Not found' }, 404);
+        sanitizeImageRow(row);
         // 标记是否有文件（供客户端决定是否下载 blob）
         row.hasImage = !!(fileManager && fileManager.getImagePath(id));
         row.hasThumbnail = !!(fileManager && fileManager.getThumbnailPath(id));
@@ -243,10 +256,11 @@ function createDbRouter(queries, fileManager) {
       if (urlPath === '/api/db/images/list' && method === 'POST') {
         const { opts } = await readJson(req);
         const rows = queries.getImages(opts || {});
-        // Attach hasImage / hasThumbnail flags so the client knows
-        // whether binary files exist on disk (mirrors the /get/:id endpoint).
-        if (fileManager) {
-          for (const row of rows) {
+        // Clean stale blob: URLs and attach hasImage / hasThumbnail flags
+        // so the client knows whether binary files exist on disk.
+        for (const row of rows) {
+          sanitizeImageRow(row);
+          if (fileManager) {
             row.hasImage = !!fileManager.getImagePath(row.id);
             row.hasThumbnail = !!fileManager.getThumbnailPath(row.id);
           }
@@ -257,6 +271,7 @@ function createDbRouter(queries, fileManager) {
       if (urlPath === '/api/db/images/search' && method === 'POST') {
         const { keyword } = await readJson(req);
         const rows = queries.searchImages(keyword);
+        for (const row of rows) sanitizeImageRow(row);
         return sendJson(res, rows);
       }
 
@@ -491,6 +506,8 @@ function createDbRouter(queries, fileManager) {
       return sendJson(res, { error: 'Unknown DB endpoint', path: urlPath }, 404);
 
     } catch (err) {
+      console.error(`[api-server][db] ${req.method} ${urlPath} failed:`, err.message || err);
+      if (err.stack) console.error('[api-server][db] Stack:', err.stack);
       return sendError(res, err);
     }
   }

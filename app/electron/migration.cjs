@@ -117,6 +117,20 @@ function packImageData(image) {
 }
 
 /**
+ * Sanitise a value for sql.js bind — objects/arrays become JSON strings,
+ * undefined becomes null.
+ */
+function safeBind(v) {
+  if (v === null || v === undefined) return null;
+  const t = typeof v;
+  if (t === 'number' || t === 'string') return v;
+  if (t === 'boolean') return v ? 1 : 0;
+  if (t === 'bigint') return Number(v);
+  if (v instanceof Uint8Array || v instanceof ArrayBuffer) return v;
+  try { return JSON.stringify(v); } catch (_) { return String(v); }
+}
+
+/**
  * 直接插入一条 images 记录（保留原始 ID，绕过 AUTOINCREMENT）
  */
 function insertImageWithId(img) {
@@ -132,24 +146,24 @@ function insertImageWithId(img) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     img.id,
-    img.batchId ?? null,
-    img.folderId ?? null,
-    img.model ?? null,
+    safeBind(img.batchId),
+    safeBind(img.folderId),
+    safeBind(img.model),
     img.prompt ?? '',
     img.favorite ? 1 : 0,
     img.status ?? 'completed',
     img.storageZone ?? 'hot',
-    img.filePath ?? null,
-    img.thumbnailPath ?? null,
+    safeBind(img.filePath),
+    safeBind(img.thumbnailPath),
     img.blobSize ?? 0,
     img.width ?? 0,
     img.height ?? 0,
-    img.sourceUrl ?? null,
-    img.ossUrl ?? null,
-    img.ossKey ?? null,
-    img.taskId ?? null,
+    safeBind(img.sourceUrl),
+    safeBind(img.ossUrl),
+    safeBind(img.ossKey),
+    safeBind(img.taskId),
     img.syncStatus ?? 'pending',
-    img.fileHash ?? null,
+    safeBind(img.fileHash),
     img.createdAt ?? Date.now(),
     dataJson
   ]);

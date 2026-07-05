@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: ""
-title: AI Image Studio 项目根（契约与交付层）
+title: AI Image Studio 需求与交付契约层
 scope:
     - README.md
     - .gitignore

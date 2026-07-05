@@ -92,7 +92,9 @@ function updateSyncFields(id, fields) {
   const vals = [];
   for (const [key, value] of Object.entries(fields)) {
     sets.push(`${key} = ?`);
-    vals.push(value);
+    // Defensive: sql.js only accepts primitives; JSON-stringify objects
+    vals.push(value !== null && value !== undefined && typeof value === 'object'
+      ? JSON.stringify(value) : (value ?? null));
   }
   if (sets.length === 0) return;
   vals.push(id);
