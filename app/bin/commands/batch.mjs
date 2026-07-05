@@ -67,7 +67,7 @@ export async function batchAction(opts, ctx) {
   }
 
   if (prompts.length === 0) {
-    process.stderr.write('[batch] No prompts found in file\n');
+    log('[batch] No prompts found in file');
     process.stdout.write('[]\n');
     return;
   }
@@ -88,7 +88,7 @@ export async function batchAction(opts, ctx) {
       prompt,
       model: opts.model,
       size: opts.size,
-      count: opts.count,
+      count: '1',  // batch mode: one image per prompt
       quality: opts.quality,
       expand: opts.expand,
       seed: opts.seed,
