@@ -245,23 +245,25 @@ registerFoldersCommand(program, preflight);
 // tasks — 查看任务
 registerTasksCommand(program, preflight);
 
-// batch — 批量操作
+// batch — 批量生成
 program
   .command('batch')
-  .description('批量生成图像 (从文件读取 prompts)')
-  .option('-f, --file <path>', '包含 prompts 的 JSON 文件路径')
-  .option('-m, --model <id>', '模型 ID', 'qwen-image-3')
-  .option('--concurrency <n>', '并发数', '2')
+  .description('批量生成图像 (从文本文件逐行读取 prompts)')
+  .requiredOption('-f, --file <path>', '包含 prompts 的文本文件路径 (每行一个 prompt，# 开头为注释)')
+  .option('-m, --model <id>', '模型 ID (qwen-image-3 | gpt-image-2 | nanobanana-2)', 'qwen-image-3')
+  .option('--size <ratio>', '尺寸比例 (1:1 | 16:9 | 9:16 | 3:4 | 4:3 | auto)', '1:1')
+  .option('--count <n>', '每次生成数量 (1-4，取决于模型)', '1')
+  .option('--quality <level>', '质量档位 (模型相关)')
+  .option('--expand', '调用 LLM 扩写每条 prompt', false)
+  .option('--seed <n>', '种子值 (-1 = 随机)', '-1')
+  .option('--negative <text>', '负面提示词 (仅 Qwen 支持)')
+  .option('--no-prompt-extend', '禁用 Qwen 内置 prompt_extend')
+  .option('--folder <name>', '自动归入指定文件夹 (不存在则创建)')
   .action(async (opts, cmd) => {
     const ctx = await preflight(cmd.parent.opts());
     if (!ctx) return;
-    const { port } = ctx;
-    outputResult({
-      command: 'batch',
-      status: 'not_implemented',
-      message: 'batch 命令尚未实现，将在后续版本中添加。',
-      port,
-    });
+    const { batchAction } = await import('./commands/batch.mjs');
+    await batchAction(opts, ctx);
   });
 
 // ─── 解析并执行 ────────────────────────────────────────────────────────────

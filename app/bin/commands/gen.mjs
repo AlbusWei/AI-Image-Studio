@@ -226,10 +226,15 @@ function parseSizeToDimensions(sizeStr) {
  * @param {Object} ctx - { port, quiet } from preflight
  */
 export async function genAction(opts, ctx) {
-  const { quiet } = ctx;
+  const { quiet, collectMode } = ctx;
   const log = (...args) => { if (!quiet) process.stderr.write(args.join(' ') + '\n'); };
-  const outputResult = (data) => process.stdout.write(JSON.stringify(data, null, 2) + '\n');
+  let _collected = null;
+  const outputResult = (data) => {
+    if (collectMode) { _collected = { ok: true, data }; return; }
+    process.stdout.write(JSON.stringify(data, null, 2) + '\n');
+  };
   const outputError = (err, exitCode = EXIT.ERROR) => {
+    if (collectMode) { _collected = { ok: false, error: err }; return; }
     process.stderr.write(JSON.stringify(err) + '\n');
     process.exitCode = exitCode;
   };
@@ -489,4 +494,6 @@ export async function genAction(opts, ctx) {
   } else {
     outputResult(persistedImages);
   }
+
+  return _collected;
 }
