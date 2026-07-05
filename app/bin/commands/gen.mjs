@@ -364,8 +364,8 @@ export async function genAction(opts, ctx) {
     }
   } catch (err) {
     // Distinguish model API errors from general/network errors
-    const isModelApiError = (err.status >= 400 && err.status < 500) ||
-      /content|violation|sensitive|quota|rate.limit/i.test(err.message);
+    const isModelApiError = (err.status && err.status >= 400 && err.status < 500) ||
+      /content|violation|sensitive|quota|rate.?limit|banned|blocked/i.test(err.message || '');
     const exitCode = isModelApiError ? EXIT.MODEL_API_ERROR : EXIT.ERROR;
     return outputError({
       error: 'GENERATION_FAILED',
