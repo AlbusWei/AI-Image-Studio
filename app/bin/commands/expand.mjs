@@ -31,9 +31,6 @@ export async function expandAction(prompt, opts, ctx) {
 
   try {
     const llm = getLLMAdapter();
-    if (process.env.VITE_EXPANSION_LLM_MODEL) {
-      llm.model = process.env.VITE_EXPANSION_LLM_MODEL;
-    }
 
     const context = {};
     if (opts.model) context.model = opts.model;
@@ -41,14 +38,19 @@ export async function expandAction(prompt, opts, ctx) {
 
     log('[expand] Expanding prompt via LLM...');
     const controller = new AbortController();
-    process.once('SIGINT', () => controller.abort());
-    const variations = await llm.expandPrompt(prompt, context, controller.signal);
+    const sigintHandler = () => controller.abort();
+    process.once('SIGINT', sigintHandler);
+    try {
+      const variations = await llm.expandPrompt(prompt, context, controller.signal);
 
-    if (!variations || variations.length === 0) {
-      return outputError({ error: 'EXPAND_FAILED', message: 'LLM returned no variations' });
+      if (!variations || variations.length === 0) {
+        return outputError({ error: 'EXPAND_FAILED', message: 'LLM returned no variations' });
+      }
+
+      outputResult({ original: prompt, variations });
+    } finally {
+      process.removeListener('SIGINT', sigintHandler);
     }
-
-    outputResult({ original: prompt, variations });
   } catch (err) {
     outputError({ error: 'EXPAND_FAILED', message: err.message });
   }

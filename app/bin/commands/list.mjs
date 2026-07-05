@@ -32,6 +32,17 @@ export async function listAction(opts, ctx) {
       log('[list] Searching images with keyword:', opts.search);
       const res = await apiClient.post('/db/images/search', { keyword: opts.search });
       images = res.data || [];
+
+      // Apply client-side filters (search API only accepts keyword)
+      if (opts.model) {
+        images = images.filter(img => img.model === opts.model);
+      }
+      if (opts.favorite) {
+        images = images.filter(img => img.favorite === true);
+      }
+      const offset = opts.offset ? parseInt(opts.offset, 10) : 0;
+      const limit = opts.limit ? parseInt(opts.limit, 10) : 20;
+      images = images.slice(offset, offset + limit);
     } else {
       const listOpts = {
         limit: parseInt(opts.limit, 10) || 20,
