@@ -90,23 +90,25 @@ function fileToDataUrl(filePath) {
 }
 
 /**
- * Download an image from a URL and return the buffer.
+ * Download an image from a URL and return the buffer with MIME type.
  * @param {string} url
- * @returns {Promise<Buffer>}
+ * @returns {Promise<{ buffer: Buffer, mime: string }>}
  */
 async function downloadImage(url) {
   // Handle data URLs directly
   if (url.startsWith('data:')) {
+    const mime = url.split(';')[0].split(':')[1] || 'image/png';
     const base64 = url.split(',')[1];
-    return Buffer.from(base64, 'base64');
+    return { buffer: Buffer.from(base64, 'base64'), mime };
   }
 
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to download image: HTTP ${response.status} from ${url.slice(0, 120)}`);
   }
+  const mime = response.headers.get('content-type') || 'image/png';
   const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(arrayBuffer);
+  return { buffer: Buffer.from(arrayBuffer), mime };
 }
 
 /**
@@ -154,10 +156,11 @@ function buildAdapterParams(modelId, opts) {
  *
  * @param {Object} imageMeta - { model, prompt, sourceUrl, width, height, batchId, ... }
  * @param {Buffer} imageBuffer - image binary
+ * @param {string} mimeType - MIME type for the upload
  * @param {Function} logStderr - stderr logger
  * @returns {Promise<Object>} persisted image record
  */
-async function persistImage(imageMeta, imageBuffer, logStderr) {
+async function persistImage(imageMeta, imageBuffer, mimeType, logStderr) {
   // 1. Create metadata record
   const addRes = await apiClient.post('/db/images/add', { image: imageMeta });
   const imageId = addRes.data.id;
@@ -165,7 +168,7 @@ async function persistImage(imageMeta, imageBuffer, logStderr) {
 
   // 2. Upload binary
   await apiClient.put(`/db/images/file/${imageId}`, imageBuffer, {
-    headers: { 'Content-Type': 'image/png' },
+    headers: { 'Content-Type': mimeType },
     timeout: 60000,
   });
   logStderr(`[gen] Image file uploaded (${imageBuffer.length} bytes)`);
@@ -376,6 +379,16 @@ export async function genAction(opts, ctx) {
   }
 
   const genDuration = Date.now() - startTime;
+
+  if (!genResult?.images?.length) {
+    return outputError({
+      error: 'GENERATION_FAILED',
+      message: 'Adapter returned no images',
+      model: modelId,
+      prompt: finalPrompt,
+    }, EXIT.ERROR);
+  }
+
   log(`[gen] Generation completed in ${genDuration}ms, ${genResult.images.length} image(s)`);
 
   // ── 5. Create batch record ───────────────────────────────────────────────
@@ -404,8 +417,8 @@ export async function genAction(opts, ctx) {
 
     try {
       // Download
-      const imageBuffer = await downloadImage(img.url);
-      log(`[gen] Downloaded ${imageBuffer.length} bytes`);
+      const { buffer: imageBuffer, mime } = await downloadImage(img.url);
+      log(`[gen] Downloaded ${imageBuffer.length} bytes (${mime})`);
 
       // Build metadata
       const meta = {
@@ -426,7 +439,7 @@ export async function genAction(opts, ctx) {
       };
 
       // Persist to DB
-      const record = await persistImage(meta, imageBuffer, log);
+      const record = await persistImage(meta, imageBuffer, mime, log);
       persistedImages.push({
         id: record.id,
         model: modelId,
