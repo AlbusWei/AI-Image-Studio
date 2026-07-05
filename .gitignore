@@ -39,3 +39,26 @@ generated/
 
 # Test coverage
 coverage/
+
+# Build artifacts
+release/
+*.exe
+*.dll
+*.asar
+
+# Test screenshots
+e2e-*.png
+v1-*.png
+
+# IDE/workspace
+*.code-workspace
+
+# Canvas/obsidian
+*.canvas.status.json
+*.canvas.tsx
+
+# Misc generated files
+vibe_images/
+app/test-cat.png
+__diff_temp.txt
+.qoder/

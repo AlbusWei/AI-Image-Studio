@@ -4,7 +4,7 @@
  * 在 import adapter 代码之前执行，完成以下工作：
  * 1. 用 dotenv 加载 app/.env
  * 2. 设置 globalThis.window mock（让 resolveApiBase 不报错）
- * 3. 导出 initEnv(port) 供 ais.mjs 调用
+ * 3. 导出 initEnvironment() 和 configureApiClient(port) 供 ais.mjs 调用
  */
 
 import { fileURLToPath } from 'node:url';
