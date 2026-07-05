@@ -16,6 +16,8 @@ const isDev = !app.isPackaged;
 
 /** @type {number|null} API server 实际端口 */
 let apiServerPort = null;
+/** @type {string|null} 页面首次加载完成的 URL，用于区分首次加载与后续 SPA 导航 */
+let lastUrl = null;
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -37,6 +39,22 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
+
+  // SPA 内部导航会触发 did-navigate-in-page，首次加载完成触发 did-finish-load
+  mainWindow.webContents.on('did-finish-load', () => {
+    const url = mainWindow.webContents.getURL();
+    if (lastUrl !== url) {
+      lastUrl = url;
+      console.log('[Main] Page loaded:', url);
+    }
+  });
+
+  mainWindow.webContents.on('did-navigate-in-page', (_event, url) => {
+    if (lastUrl !== url) {
+      lastUrl = url;
+      console.log('[Main] Page navigated:', url);
+    }
+  });
 
   return mainWindow;
 }
@@ -86,7 +104,7 @@ app.whenReady().then(async () => {
   // 9. 创建主窗口
   const mainWindow = createWindow();
 
-  // 10. 窗口加载完成后执行一次性 IndexedDB → SQLite 迁移
+  // 11. 窗口加载完成后执行一次性 IndexedDB → SQLite 迁移
   mainWindow.webContents.once('did-finish-load', () => {
     runMigration(mainWindow, getDb, fileManager);
   });
