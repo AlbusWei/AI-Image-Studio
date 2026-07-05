@@ -22,8 +22,6 @@ initEnvironment();
 // ─── 常量 ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_PORT = 19527;
-const APPDATA = process.env.APPDATA || join(homedir(), 'AppData', 'Roaming');
-const PORT_FILE = join(APPDATA, 'ai-image-studio', '.api-port');
 
 /** Exit codes */
 const EXIT = {
@@ -34,58 +32,15 @@ const EXIT = {
   FILE_ERROR: 4,
 };
 
-// ─── 端口发现 ──────────────────────────────────────────────────────────────
+// ─── 端口解析 ──────────────────────────────────────────────────────────────
 
 /**
- * 校验端口值合法性
- * @param {string|number} raw
- * @returns {number|null}
- */
-function parsePort(raw) {
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < 1 || n > 65535) return null;
-  return n;
-}
-
-/**
- * 按优先级解析 api-server 端口：
- * 1. --port 命令行参数
- * 2. AIS_PORT 环境变量
- * 3. 端口文件 (%APPDATA%/ai-image-studio/.api-port)
- * 4. 默认 19527
+ * 解析 api-server 端口：CLI --port 参数或默认值。
  */
 function resolvePort(cliPort) {
-  let fileContent;
-  try {
-    fileContent = readFileSync(PORT_FILE, 'utf-8').trim();
-  } catch (e) {
-    if (e.code !== 'ENOENT') {
-      process.stderr.write(`[ais] Warning: failed to read port file: ${e.message}\n`);
-    }
-  }
-
-  return parsePort(cliPort) ?? parsePort(process.env.AIS_PORT) ?? parsePort(fileContent) ?? DEFAULT_PORT;
-}
-
-// ─── 连接检测 ──────────────────────────────────────────────────────────────
-
-/**
- * 检测 api-server 是否可达。
- * @param {number} port
- * @returns {Promise<boolean>}
- */
-function checkServerReachable(port) {
-  return new Promise((resolve) => {
-    const req = http.get(`http://127.0.0.1:${port}/api/db/images?limit=1`, (res) => {
-      res.resume(); // 消费响应数据
-      resolve(true);
-    });
-    req.on('error', () => resolve(false));
-    req.setTimeout(3000, () => {
-      req.destroy();
-      resolve(false);
-    });
-  });
+  const n = Number(cliPort);
+  if (Number.isInteger(n) && n >= 1 && n <= 65535) return n;
+  return DEFAULT_PORT;
 }
 
 // ─── 输出辅助函数 ──────────────────────────────────────────────────────────
@@ -137,9 +92,6 @@ async function preflight(options) {
   const port = resolvePort(options.port);
   const quiet = options.quiet || false;
 
-  logStderr(quiet, `[ais] Connecting to api-server at 127.0.0.1:${port}...`);
-
-  // 配置 axios baseURL（动态 import adapter 并设置）
   await configureApiClient(port);
 
   const reachable = await checkServerReachable(port);
@@ -149,11 +101,24 @@ async function preflight(options) {
       message: `Cannot connect to api-server at 127.0.0.1:${port}. Is the Electron app running?`,
       details: { port },
     }, EXIT.SERVER_UNREACHABLE);
-    return null; // signal failure
+    return null;
   }
 
-  logStderr(quiet, '[ais] api-server is running');
   return { port, quiet };
+}
+
+function checkServerReachable(port) {
+  return new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:${port}/api/db/images?limit=1`, (res) => {
+      res.resume();
+      resolve(true);
+    });
+    req.on('error', () => resolve(false));
+    req.setTimeout(3000, () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
 }
 
 // ─── 命令注册 ──────────────────────────────────────────────────────────────
@@ -185,38 +150,30 @@ program
   .command('expand')
   .description('使用 LLM 扩写提示词')
   .argument('<prompt>', '原始提示词')
+  .option('-s, --style <style>', '风格偏好')
   .option('-m, --model <id>', '目标生成模型')
   .action(async (prompt, opts, cmd) => {
     const ctx = await preflight(cmd.parent.opts());
     if (!ctx) return;
-    const { port } = ctx;
-    outputResult({
-      command: 'expand',
-      status: 'not_implemented',
-      message: 'expand 命令尚未实现，将在后续版本中添加。',
-      prompt,
-      port,
-    });
+    const { expandAction } = await import('./commands/expand.mjs');
+    await expandAction(prompt, opts, ctx);
   });
 
 // list — 列出图像
 program
   .command('list')
   .description('列出图库中的图像')
+  .option('-m, --model <id>', '按模型筛选')
   .option('-f, --folder <name>', '按文件夹筛选')
   .option('--favorite', '仅显示收藏')
+  .option('--search <keyword>', '搜索 prompt/元数据')
   .option('--limit <n>', '返回数量', '20')
   .option('--offset <n>', '偏移量', '0')
   .action(async (opts, cmd) => {
     const ctx = await preflight(cmd.parent.opts());
     if (!ctx) return;
-    const { port } = ctx;
-    outputResult({
-      command: 'list',
-      status: 'not_implemented',
-      message: 'list 命令尚未实现，将在后续版本中添加。',
-      port,
-    });
+    const { listAction } = await import('./commands/list.mjs');
+    await listAction(opts, ctx);
   });
 
 // get — 获取单张图像详情
@@ -227,14 +184,8 @@ program
   .action(async (id, opts, cmd) => {
     const ctx = await preflight(cmd.parent.opts());
     if (!ctx) return;
-    const { port } = ctx;
-    outputResult({
-      command: 'get',
-      status: 'not_implemented',
-      message: 'get 命令尚未实现，将在后续版本中添加。',
-      id,
-      port,
-    });
+    const { getAction } = await import('./commands/get.mjs');
+    await getAction(id, opts, ctx);
   });
 
 // stats — 统计信息
@@ -244,13 +195,8 @@ program
   .action(async (opts, cmd) => {
     const ctx = await preflight(cmd.parent.opts());
     if (!ctx) return;
-    const { port } = ctx;
-    outputResult({
-      command: 'stats',
-      status: 'not_implemented',
-      message: 'stats 命令尚未实现，将在后续版本中添加。',
-      port,
-    });
+    const { statsAction } = await import('./commands/stats.mjs');
+    await statsAction(opts, ctx);
   });
 
 // delete — 删除图像
