@@ -202,40 +202,27 @@ program
 // delete — 删除图像
 program
   .command('delete')
-  .description('删除图像')
-  .argument('<id>', '图像 ID')
+  .description('删除图像 (支持单个或多个 ID)')
+  .argument('<ids...>', '一个或多个图像 ID')
   .option('--confirm', '跳过确认提示')
-  .action(async (id, opts, cmd) => {
+  .action(async (ids, opts, cmd) => {
     const ctx = await preflight(cmd.parent.opts());
     if (!ctx) return;
-    const { port } = ctx;
-    outputResult({
-      command: 'delete',
-      status: 'not_implemented',
-      message: 'delete 命令尚未实现，将在后续版本中添加。',
-      id,
-      port,
-    });
+    const { deleteAction } = await import('./commands/delete.mjs');
+    await deleteAction(ids, opts, ctx);
   });
 
 // move — 移动图像到文件夹
 program
   .command('move')
   .description('移动图像到指定文件夹')
-  .argument('<id>', '图像 ID')
-  .argument('<folder>', '目标文件夹')
-  .action(async (id, folder, opts, cmd) => {
+  .argument('<ids...>', '一个或多个图像 ID')
+  .requiredOption('--folder <name>', '目标文件夹名称')
+  .action(async (ids, opts, cmd) => {
     const ctx = await preflight(cmd.parent.opts());
     if (!ctx) return;
-    const { port } = ctx;
-    outputResult({
-      command: 'move',
-      status: 'not_implemented',
-      message: 'move 命令尚未实现，将在后续版本中添加。',
-      id,
-      folder,
-      port,
-    });
+    const { moveAction } = await import('./commands/move.mjs');
+    await moveAction(ids, opts, ctx);
   });
 
 // favorite — 切换收藏
@@ -243,18 +230,11 @@ program
   .command('favorite')
   .description('切换图像收藏状态')
   .argument('<id>', '图像 ID')
-  .option('--unset', '取消收藏')
   .action(async (id, opts, cmd) => {
     const ctx = await preflight(cmd.parent.opts());
     if (!ctx) return;
-    const { port } = ctx;
-    outputResult({
-      command: 'favorite',
-      status: 'not_implemented',
-      message: 'favorite 命令尚未实现，将在后续版本中添加。',
-      id,
-      port,
-    });
+    const { favoriteAction } = await import('./commands/favorite.mjs');
+    await favoriteAction(id, opts, ctx);
   });
 
 // folders — 管理文件夹
