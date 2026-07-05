@@ -139,7 +139,7 @@ function buildAdapterParams(modelId, opts) {
     params.quality = opts.quality;
   }
 
-  if (modelId === 'gpt-image-2' && opts.seed !== undefined) {
+  if (modelId === 'gpt-image-2' && opts.seed !== undefined && parseInt(opts.seed, 10) >= 0) {
     params.seed = parseInt(opts.seed, 10);
   }
 
@@ -208,7 +208,7 @@ function parseSizeToDimensions(sizeStr) {
   }
   // Ratio format: estimate from common sizes
   const ratioDims = {
-    '1:1': [1024, 1024], '16:9': [1920, 1080], '9:16': [1080, 1920],
+    '1:1': [1024, 1024], '16:9': [1920, 1088], '9:16': [1088, 1920],
     '3:4': [832, 1120], '4:3': [1120, 832], 'auto': [1024, 1024],
   };
   if (ratioDims[sizeStr]) return { width: ratioDims[sizeStr][0], height: ratioDims[sizeStr][1] };
@@ -363,12 +363,16 @@ export async function genAction(opts, ctx) {
       );
     }
   } catch (err) {
+    // Distinguish model API errors from general/network errors
+    const isModelApiError = (err.status >= 400 && err.status < 500) ||
+      /content|violation|sensitive|quota|rate.limit/i.test(err.message);
+    const exitCode = isModelApiError ? EXIT.MODEL_API_ERROR : EXIT.ERROR;
     return outputError({
       error: 'GENERATION_FAILED',
       message: err.message,
       model: modelId,
       prompt: finalPrompt,
-    }, EXIT.MODEL_API_ERROR);
+    }, exitCode);
   }
 
   const genDuration = Date.now() - startTime;
