@@ -15,6 +15,8 @@ import { homedir } from 'node:os';
 import http from 'node:http';
 import { Command } from 'commander';
 import { initEnvironment, configureApiClient } from './setup.mjs';
+import { registerFoldersCommand } from './commands/folders.mjs';
+import { registerTasksCommand } from './commands/tasks.mjs';
 
 // ─── 环境初始化（必须在 import adapter 之前） ─────────────────────────────
 initEnvironment();
@@ -238,38 +240,10 @@ program
   });
 
 // folders — 管理文件夹
-program
-  .command('folders')
-  .description('列出或管理文件夹')
-  .option('--create <name>', '创建新文件夹')
-  .action(async (opts, cmd) => {
-    const ctx = await preflight(cmd.parent.opts());
-    if (!ctx) return;
-    const { port } = ctx;
-    outputResult({
-      command: 'folders',
-      status: 'not_implemented',
-      message: 'folders 命令尚未实现，将在后续版本中添加。',
-      port,
-    });
-  });
+registerFoldersCommand(program, preflight);
 
 // tasks — 查看任务
-program
-  .command('tasks')
-  .description('查看任务中心状态')
-  .option('--id <taskId>', '查看指定任务详情')
-  .action(async (opts, cmd) => {
-    const ctx = await preflight(cmd.parent.opts());
-    if (!ctx) return;
-    const { port } = ctx;
-    outputResult({
-      command: 'tasks',
-      status: 'not_implemented',
-      message: 'tasks 命令尚未实现，将在后续版本中添加。',
-      port,
-    });
-  });
+registerTasksCommand(program, preflight);
 
 // batch — 批量操作
 program
