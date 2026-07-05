@@ -1,0 +1,52 @@
+/* ============================================
+   Spark Design Token Bridge
+   Re-exports design tokens under Spark naming convention
+   This file is imported by main.jsx to ensure Spark token availability
+   ============================================ */
+
+:root {
+  /* Spark Design semantic tokens — mapped from seed tokens */
+  --spark-color-bg: var(--bg-base);
+  --spark-color-bg-panel: var(--bg-panel);
+  --spark-color-bg-elevated: var(--bg-elevated);
+  --spark-color-bg-hover: var(--bg-hover);
+  --spark-color-bg-input: var(--bg-input);
+  --spark-color-bg-card: var(--bg-card);
+
+  --spark-color-text: var(--text-primary);
+  --spark-color-text-secondary: var(--text-secondary);
+  --spark-color-text-muted: var(--text-tertiary);
+  --spark-color-text-disabled: var(--text-muted);
+
+  --spark-color-accent: var(--accent-primary);
+  --spark-color-accent-hover: var(--accent-hover);
+  --spark-color-accent-secondary: var(--accent-secondary);
+  --spark-color-success: var(--accent-success);
+  --spark-color-warning: var(--accent-warning);
+  --spark-color-danger: var(--accent-danger);
+
+  --spark-color-border: var(--border-default);
+  --spark-color-border-subtle: var(--border-subtle);
+  --spark-color-border-strong: var(--border-strong);
+  --spark-color-border-focus: var(--border-focus);
+
+  --spark-radius-sm: var(--radius-sm);
+  --spark-radius-md: var(--radius-md);
+  --spark-radius-lg: var(--radius-lg);
+  --spark-radius-xl: var(--radius-xl);
+  --spark-radius-full: var(--radius-pill);
+
+  --spark-spacing-1: var(--sp-1);
+  --spark-spacing-2: var(--sp-2);
+  --spark-spacing-3: var(--sp-3);
+  --spark-spacing-4: var(--sp-4);
+  --spark-spacing-6: var(--sp-6);
+  --spark-spacing-8: var(--sp-8);
+
+  --spark-font-sans: var(--font-sans);
+  --spark-font-mono: var(--font-mono);
+
+  --spark-shadow-sm: var(--shadow-sm);
+  --spark-shadow-md: var(--shadow-md);
+  --spark-shadow-lg: var(--shadow-lg);
+}

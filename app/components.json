@@ -1,0 +1,15 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "spark",
+  "rsc": false,
+  "tsx": false,
+  "aliases": {
+    "components": "@/components",
+    "ui": "@/components/ui",
+    "utils": "@/lib/utils"
+  },
+  "styleOptions": {
+    "appearance": "dark",
+    "theme": "studio"
+  }
+}
