@@ -15,7 +15,7 @@ function getImageDisplayUrl(img) {
   if (!img) return '';
   if (img.blobUrl) return img.blobUrl;
   if (img.thumbnailUrl && img.thumbnailUrl.startsWith('blob:')) return img.thumbnailUrl;
-  const raw = img.url || '';
+  const raw = img.url || img.sourceUrl || '';
   if (raw.startsWith('http://') || raw.startsWith('https://')) return proxyImageUrl(raw);
   return raw;
 }

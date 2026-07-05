@@ -21,7 +21,7 @@ let lastUrl = null;
 /** @type {boolean} IndexedDB → SQLite 迁移是否已执行 */
 let migrationDone = false;
 
-function createWindow(getDbRef, fileManagerRef, port) {
+function createWindow(getDbRef, fileManagerRef) {
   const mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -52,10 +52,6 @@ function createWindow(getDbRef, fileManagerRef, port) {
     if (!migrationDone) {
       migrationDone = true;
       runMigration(mainWindow, getDbRef, fileManagerRef);
-    }
-    // Inject API port for proxyImageUrl in production mode
-    if (port) {
-      mainWindow.webContents.executeJavaScript(`window.__electronApiPort = ${port};`);
     }
   });
 
@@ -96,6 +92,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('app:getPath', () => app.getPath('userData'));
   ipcMain.handle('app:getVersion', () => app.getVersion());
   ipcMain.handle('app:getApiPort', () => apiServerPort);
+  // Synchronous port getter for preload (sendSync, zero race condition)
+  ipcMain.on('app:getApiPortSync', (event) => { event.returnValue = apiServerPort; });
 
   // 7. 启动 API 代理服务器
   try {
@@ -112,10 +110,10 @@ app.whenReady().then(async () => {
   powerMonitor.on('resume', onNetworkResume);
 
   // 9. 创建主窗口
-  const mainWindow = createWindow(getDb, fileManager, apiServerPort);
+  const mainWindow = createWindow(getDb, fileManager);
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow(getDb, fileManager, apiServerPort);
+    if (BrowserWindow.getAllWindows().length === 0) createWindow(getDb, fileManager);
   });
 });
 

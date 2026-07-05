@@ -31,7 +31,7 @@ function getImageDisplayUrl(img) {
   // thumbnail blob URL
   if (img.thumbnailUrl && img.thumbnailUrl.startsWith('blob:')) return img.thumbnailUrl
   // For remote URLs (http/https), wrap with CORS proxy
-  const raw = img.thumbnailUrl || img.url || ''
+  const raw = img.thumbnailUrl || img.url || img.sourceUrl || ''
   if (raw.startsWith('http://') || raw.startsWith('https://')) {
     return proxyImageUrl(raw)
   }

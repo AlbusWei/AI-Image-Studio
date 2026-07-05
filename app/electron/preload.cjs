@@ -1,5 +1,11 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Synchronously inject API port before any page script runs (zero race condition)
+const apiPort = ipcRenderer.sendSync('app:getApiPortSync');
+if (apiPort) {
+  window.__electronApiPort = apiPort;
+}
+
 // 暴露安全的 IPC 接口给 renderer 进程
 contextBridge.exposeInMainWorld('electronAPI', {
   // 数据库操作 — 全部 30 个函数通过 IPC 调用 main 进程 SQLite

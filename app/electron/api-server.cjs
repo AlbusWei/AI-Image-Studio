@@ -16,6 +16,7 @@
 const http = require('http');
 const path = require('path');
 const dotenv = require('dotenv');
+const sharp = (() => { try { return require('sharp'); } catch { return null; } })();
 
 // ─── 加载 .env ────────────────────────────────────────────────────────
 
@@ -242,6 +243,14 @@ function createDbRouter(queries, fileManager) {
       if (urlPath === '/api/db/images/list' && method === 'POST') {
         const { opts } = await readJson(req);
         const rows = queries.getImages(opts || {});
+        // Attach hasImage / hasThumbnail flags so the client knows
+        // whether binary files exist on disk (mirrors the /get/:id endpoint).
+        if (fileManager) {
+          for (const row of rows) {
+            row.hasImage = !!fileManager.getImagePath(row.id);
+            row.hasThumbnail = !!fileManager.getThumbnailPath(row.id);
+          }
+        }
         return sendJson(res, rows);
       }
 
@@ -313,6 +322,38 @@ function createDbRouter(queries, fileManager) {
         res.setHeader('Content-Type', result.mimeType || 'image/jpeg');
         res.setHeader('Content-Length', result.buffer.length);
         return res.end(result.buffer);
+      }
+
+      // ── Thumbnail auto-generation ────────────────────────────────────
+      // Generate a thumbnail from the original image if one doesn't exist.
+      // Used by the http-backend to fill missing thumbnails on-the-fly.
+      if (urlPath.startsWith('/api/db/images/generateThumbnail/') && method === 'POST') {
+        const id = parseInt(urlPath.slice('/api/db/images/generateThumbnail/'.length), 10);
+        if (isNaN(id)) return sendJson(res, { error: 'Invalid id' }, 400);
+        if (!fileManager) return sendJson(res, { error: 'FileManager not available' }, 503);
+        // Check if thumbnail already exists
+        if (fileManager.getThumbnailPath(id)) {
+          return sendJson(res, { ok: true, alreadyExists: true });
+        }
+        // Read original image
+        const original = await fileManager.readImage(id);
+        if (!original) return sendJson(res, { error: 'Original image not found' }, 404);
+        if (!sharp) {
+          // sharp not available — copy original as thumbnail (suboptimal but functional)
+          await fileManager.saveThumbnail(id, original.buffer);
+          return sendJson(res, { ok: true, fallback: 'copy' });
+        }
+        try {
+          const thumbBuffer = await sharp(original.buffer)
+            .resize(200, 200, { fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: 80 })
+            .toBuffer();
+          await fileManager.saveThumbnail(id, thumbBuffer);
+          return sendJson(res, { ok: true, size: thumbBuffer.length });
+        } catch (err) {
+          console.error('[api-server] Thumbnail generation failed:', err.message);
+          return sendJson(res, { error: err.message }, 500);
+        }
       }
 
       // ── Batches ─────────────────────────────────────────────────────

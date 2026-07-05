@@ -89,10 +89,7 @@ export function createElectronBackend(electronAPI) {
       try {
         const thumbResult = await fs.readThumbnail(row.id);
         if (thumbResult && thumbResult.buffer) {
-          const buf = thumbResult.buffer;
-          const arrayBuf = buf instanceof ArrayBuffer
-            ? buf
-            : (ArrayBuffer.isView(buf) ? buf.buffer : new Uint8Array(buf).buffer);
+          const arrayBuf = new Uint8Array(thumbResult.buffer).buffer;
           row.thumbnailBlob = new Blob([arrayBuf], { type: thumbResult.mimeType || 'image/jpeg' });
           row.thumbnailUrl = URL.createObjectURL(row.thumbnailBlob);
         }

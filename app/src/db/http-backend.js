@@ -105,10 +105,48 @@ export function createHttpBackend() {
   async function getImages(opts = {}) {
     const rows = await apiPost('/images/list', { opts });
     // Apply Dexie-style status filtering (mirrors electron-backend behavior)
+    let result = rows;
     if (opts.status === undefined && opts.includeAllStatus !== true) {
-      return rows.filter((r) => r.status !== 'pending' && r.status !== 'failed');
+      result = rows.filter((r) => r.status !== 'pending' && r.status !== 'failed');
     }
-    return rows;
+
+    // Load thumbnail (or full image as fallback) blobs for gallery display.
+    // This mirrors the electron-backend which reads thumbnails from the file system.
+    for (const row of result) {
+      try {
+        if (row.hasThumbnail) {
+          const blob = await fetchBlob(`/images/thumbnail/${row.id}`, 'image/jpeg');
+          if (blob) {
+            row.thumbnailBlob = blob;
+            row.thumbnailUrl = URL.createObjectURL(blob);
+          }
+        } else if (row.hasImage) {
+          // No thumbnail on disk — ask server to generate one from the original
+          try {
+            const genRes = await fetch(`${API_BASE}/images/generateThumbnail/${row.id}`, { method: 'POST' });
+            if (genRes.ok) {
+              const blob = await fetchBlob(`/images/thumbnail/${row.id}`, 'image/jpeg');
+              if (blob) {
+                row.thumbnailBlob = blob;
+                row.thumbnailUrl = URL.createObjectURL(blob);
+                row.hasThumbnail = true;
+                continue;
+              }
+            }
+          } catch { /* thumbnail generation failed, fall through */ }
+          // Fallback: use the full image as display source
+          const blob = await fetchBlob(`/images/file/${row.id}`, row.mimeType || 'image/png');
+          if (blob) {
+            row.imageBlob = blob;
+            row.blobUrl = URL.createObjectURL(blob);
+          }
+        }
+      } catch {
+        // best effort — Gallery will fall back to sourceUrl proxy
+      }
+    }
+
+    return result;
   }
 
   async function getImage(id) {
