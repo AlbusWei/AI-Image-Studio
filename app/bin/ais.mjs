@@ -12,7 +12,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import http from 'node:http';
 import { Command } from 'commander';
 import { initEnvironment, configureApiClient } from './setup.mjs';
 
@@ -27,7 +26,6 @@ const DEFAULT_PORT = 19527;
 const EXIT = {
   OK: 0,
   ERROR: 1,
-  SERVER_UNREACHABLE: 2,
   MODEL_API_ERROR: 3,
   FILE_ERROR: 4,
 };
@@ -94,31 +92,7 @@ async function preflight(options) {
 
   await configureApiClient(port);
 
-  const reachable = await checkServerReachable(port);
-  if (!reachable) {
-    outputError({
-      error: 'SERVER_UNREACHABLE',
-      message: `Cannot connect to api-server at 127.0.0.1:${port}. Is the Electron app running?`,
-      details: { port },
-    }, EXIT.SERVER_UNREACHABLE);
-    return null;
-  }
-
   return { port, quiet };
-}
-
-function checkServerReachable(port) {
-  return new Promise((resolve) => {
-    const req = http.get(`http://127.0.0.1:${port}/api/db/images?limit=1`, (res) => {
-      res.resume();
-      resolve(true);
-    });
-    req.on('error', () => resolve(false));
-    req.setTimeout(3000, () => {
-      req.destroy();
-      resolve(false);
-    });
-  });
 }
 
 // ─── 命令注册 ──────────────────────────────────────────────────────────────

@@ -40,7 +40,9 @@ export async function expandAction(prompt, opts, ctx) {
     if (opts.style) context.style = opts.style;
 
     log('[expand] Expanding prompt via LLM...');
-    const variations = await llm.expandPrompt(prompt, context);
+    const controller = new AbortController();
+    process.once('SIGINT', () => controller.abort());
+    const variations = await llm.expandPrompt(prompt, context, controller.signal);
 
     if (!variations || variations.length === 0) {
       return outputError({ error: 'EXPAND_FAILED', message: 'LLM returned no variations' });
