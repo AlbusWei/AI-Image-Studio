@@ -18,8 +18,10 @@ const isDev = !app.isPackaged;
 let apiServerPort = null;
 /** @type {string|null} 页面首次加载完成的 URL，用于区分首次加载与后续 SPA 导航 */
 let lastUrl = null;
+/** @type {boolean} IndexedDB → SQLite 迁移是否已执行 */
+let migrationDone = false;
 
-function createWindow() {
+function createWindow(getDbRef, fileManagerRef) {
   const mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -40,12 +42,16 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
 
-  // SPA 内部导航会触发 did-navigate-in-page，首次加载完成触发 did-finish-load
+  // 页面加载完成：记录 URL + 首次加载时执行 IndexedDB → SQLite 迁移
   mainWindow.webContents.on('did-finish-load', () => {
     const url = mainWindow.webContents.getURL();
     if (lastUrl !== url) {
       lastUrl = url;
       console.log('[Main] Page loaded:', url);
+    }
+    if (!migrationDone) {
+      migrationDone = true;
+      runMigration(mainWindow, getDbRef, fileManagerRef);
     }
   });
 
@@ -102,15 +108,10 @@ app.whenReady().then(async () => {
   powerMonitor.on('resume', onNetworkResume);
 
   // 9. 创建主窗口
-  const mainWindow = createWindow();
-
-  // 11. 窗口加载完成后执行一次性 IndexedDB → SQLite 迁移
-  mainWindow.webContents.once('did-finish-load', () => {
-    runMigration(mainWindow, getDb, fileManager);
-  });
+  const mainWindow = createWindow(getDb, fileManager);
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) createWindow(getDb, fileManager);
   });
 });
 

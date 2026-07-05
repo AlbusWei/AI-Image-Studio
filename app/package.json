@@ -11,10 +11,10 @@
     "electron:dev": "npm run dev",
     "browser:dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "build": "vite build",
-    "preview": "vite preview",
-    "electron:build": "vite build && electron-builder --win --config electron-builder.yml",
+    "build:unpack": "vite build && electron-builder --win --dir --config electron-builder.yml",
     "build:resources": "vite build && electron-builder --win --dir --config electron-builder.yml",
-    "build:unpack": "vite build && electron-builder --win --dir --config electron-builder.yml"
+    "electron:build": "vite build && electron-builder --win --config electron-builder.yml",
+    "preview": "vite preview"
   },
   "dependencies": {
     "ali-oss": "^6.23.0",
