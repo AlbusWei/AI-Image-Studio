@@ -11,7 +11,13 @@
  * never leak into the client bundle.
  */
 
+import { resolve as resolvePath, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { loadEnv } from 'vite';
+
+// Resolve app root reliably from this file's location (src/server/ -> app/)
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const APP_ROOT = resolvePath(__dirname, '..', '..');
 
 /**
  * Read the raw request body as a Buffer (for POST / PUT).
@@ -43,6 +49,9 @@ function readBody(req) {
  * Strips trailing slash from base and ensures exactly one slash between parts.
  */
 function buildTargetUrl(base, path) {
+  if (!base) {
+    throw new Error(`[api-proxy] buildTargetUrl: base is empty! Cannot construct URL for path "${path}". Check that the corresponding environment variable (e.g. VITE_QWEN_API_BASE) is set in .env.`);
+  }
   const cleanBase = base.replace(/\/+$/, '');
   const cleanPath = path.startsWith('/') ? path : '/' + path;
   return cleanBase + cleanPath;
@@ -123,7 +132,17 @@ export default function apiProxyPlugin() {
     name: 'ai-image-studio-api-proxy',
 
     configureServer(server) {
-      const env = loadEnv(server.config.mode, server.config.root, '');
+      const envDir = APP_ROOT;
+      const env = loadEnv(server.config.mode, envDir, '');
+
+      // ─── 诊断日志 ─────────────────────────────────────────────────
+      console.log('[api-proxy][DIAG] server.config.root:', server.config.root);
+      console.log('[api-proxy][DIAG] envDir (resolved):', envDir);
+      console.log('[api-proxy][DIAG] server.config.mode:', server.config.mode);
+      console.log('[api-proxy][DIAG] loadEnv returned VITE_QWEN_API_BASE:', JSON.stringify(env.VITE_QWEN_API_BASE));
+      console.log('[api-proxy][DIAG] loadEnv returned VITE_QWEN_API_KEY:', env.VITE_QWEN_API_KEY ? '(present)' : '(MISSING)');
+      console.log('[api-proxy][DIAG] all VITE_ env keys:', Object.keys(env).filter(k => k.startsWith('VITE_')).join(', ') || '(none)');
+      // ──────────────────────────────────────────────────────────────
 
       const QWEN_API_KEY = (env.VITE_QWEN_API_KEY || '').trim();
       const QWEN_API_BASE = (env.VITE_QWEN_API_BASE || '').trim();
@@ -136,50 +155,89 @@ export default function apiProxyPlugin() {
       const LLM_KEY = (env.VITE_EXPANSION_LLM_KEY || '').trim();
       const LLM_BASE = (env.VITE_EXPANSION_LLM_BASE || '').trim();
 
+      // ─── 启动时校验 ───────────────────────────────────────────────
+      if (!QWEN_API_BASE) {
+        console.error('[api-proxy][ERROR] VITE_QWEN_API_BASE is EMPTY after loadEnv!');
+        console.error('[api-proxy][ERROR] server.config.root =', server.config.root);
+        console.error('[api-proxy][ERROR] server.config.mode =', server.config.mode);
+        console.error('[api-proxy][ERROR] Please verify .env file exists at:', resolvePath(envDir, '.env'));
+      }
+      if (!QWEN_API_KEY) {
+        console.error('[api-proxy][ERROR] VITE_QWEN_API_KEY is EMPTY after loadEnv!');
+      }
+
       // ─── Qwen DashScope ──────────────────────────────────────────────
       server.middlewares.use('/api/qwen', async (req, res, next) => {
-        const targetUrl = buildTargetUrl(QWEN_API_BASE, req.url);
-        await proxyRequest(req, res, targetUrl, {
-          Authorization: `Bearer ${QWEN_API_KEY}`,
-        });
+        try {
+          const targetUrl = buildTargetUrl(QWEN_API_BASE, req.url);
+          await proxyRequest(req, res, targetUrl, {
+            Authorization: `Bearer ${QWEN_API_KEY}`,
+          });
+        } catch (err) {
+          console.error('[api-proxy][qwen]', err.message);
+          res.statusCode = 502;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: 'Configuration error', message: err.message }));
+        }
       });
 
       // ─── EvoLink (GPT-image-2 & Nano Banana 2) ──────────────────────
       server.middlewares.use('/api/evolink', async (req, res, next) => {
-        const targetUrl = buildTargetUrl(EVOLINK_API_BASE, req.url);
-        console.log('[api-proxy][evolink] EVOLINK_API_BASE:', EVOLINK_API_BASE);
-        console.log('[api-proxy][evolink] req.url:', req.url);
-        console.log('[api-proxy][evolink] targetUrl:', targetUrl);
-        await proxyRequest(req, res, targetUrl, {
-          Authorization: `Bearer ${EVOLINK_API_KEY}`,
-        });
+        try {
+          const targetUrl = buildTargetUrl(EVOLINK_API_BASE, req.url);
+          console.log('[api-proxy][evolink] EVOLINK_API_BASE:', EVOLINK_API_BASE);
+          console.log('[api-proxy][evolink] req.url:', req.url);
+          console.log('[api-proxy][evolink] targetUrl:', targetUrl);
+          await proxyRequest(req, res, targetUrl, {
+            Authorization: `Bearer ${EVOLINK_API_KEY}`,
+          });
+        } catch (err) {
+          console.error('[api-proxy][evolink]', err.message);
+          res.statusCode = 502;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: 'Configuration error', message: err.message }));
+        }
       });
 
       // ─── Alibaba Cloud OSS ───────────────────────────────────────────
       server.middlewares.use('/api/oss', async (req, res, next) => {
-        // OSS REST endpoint: https://{bucket}.{region}.aliyuncs.com
-        const ossHost = `${OSS_BUCKET}.${OSS_REGION}.aliyuncs.com`;
-        const ossBase = `https://${ossHost}`;
-        const targetUrl = buildTargetUrl(ossBase, req.url);
-        await proxyRequest(req, res, targetUrl, {
-          // OSS uses a signature-based auth; for dev we forward access key
-          // and let the client build the full Authorization header when needed.
-          'x-oss-access-key-id': OSS_ACCESS_KEY_ID,
-          'x-oss-access-key-secret': OSS_ACCESS_KEY_SECRET,
-          Host: ossHost,
-        });
+        try {
+          // OSS REST endpoint: https://{bucket}.{region}.aliyuncs.com
+          const ossHost = `${OSS_BUCKET}.${OSS_REGION}.aliyuncs.com`;
+          const ossBase = `https://${ossHost}`;
+          const targetUrl = buildTargetUrl(ossBase, req.url);
+          await proxyRequest(req, res, targetUrl, {
+            // OSS uses a signature-based auth; for dev we forward access key
+            // and let the client build the full Authorization header when needed.
+            'x-oss-access-key-id': OSS_ACCESS_KEY_ID,
+            'x-oss-access-key-secret': OSS_ACCESS_KEY_SECRET,
+            Host: ossHost,
+          });
+        } catch (err) {
+          console.error('[api-proxy][oss]', err.message);
+          res.statusCode = 502;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: 'Configuration error', message: err.message }));
+        }
       });
 
       // ─── Expansion LLM (DashScope compatible / OpenAI-style) ────────
       server.middlewares.use('/api/llm', async (req, res, next) => {
-        const targetUrl = buildTargetUrl(LLM_BASE, req.url);
-        console.log('[api-proxy][llm] LLM_BASE:', LLM_BASE);
-        console.log('[api-proxy][llm] req.url:', req.url);
-        console.log('[api-proxy][llm] targetUrl:', targetUrl);
-        console.log('[api-proxy][llm] has LLM_KEY:', !!LLM_KEY);
-        await proxyRequest(req, res, targetUrl, {
-          Authorization: `Bearer ${LLM_KEY}`,
-        });
+        try {
+          const targetUrl = buildTargetUrl(LLM_BASE, req.url);
+          console.log('[api-proxy][llm] LLM_BASE:', LLM_BASE);
+          console.log('[api-proxy][llm] req.url:', req.url);
+          console.log('[api-proxy][llm] targetUrl:', targetUrl);
+          console.log('[api-proxy][llm] has LLM_KEY:', !!LLM_KEY);
+          await proxyRequest(req, res, targetUrl, {
+            Authorization: `Bearer ${LLM_KEY}`,
+          });
+        } catch (err) {
+          console.error('[api-proxy][llm]', err.message);
+          res.statusCode = 502;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: 'Configuration error', message: err.message }));
+        }
       });
 
       // ─── Image Proxy (bypass CORS for external image URLs) ─────────

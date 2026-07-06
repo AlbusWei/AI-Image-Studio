@@ -19,9 +19,43 @@ const dotenv = require('dotenv');
 const sharp = (() => { try { return require('sharp'); } catch { return null; } })();
 
 // ─── 加载 .env ────────────────────────────────────────────────────────
+// 多候选路径策略：兼容 Electron / CLI / 打包后等各种运行环境
+const fs = require('fs');
+const envCandidates = [
+  path.join(__dirname, '.env'),
+  path.join(__dirname, '..', '.env'),
+  path.join(__dirname, '..', 'app', '.env'),
+  path.join(__dirname, 'app', '.env'),
+];
+// Electron 环境时追加 app.getAppPath()
+if (process.versions.electron) {
+  const electronApp = require('electron').app;
+  if (electronApp && typeof electronApp.getAppPath === 'function') {
+    envCandidates.unshift(path.join(electronApp.getAppPath(), '.env'));
+  }
+}
+let envPath;
+for (const p of envCandidates) {
+  if (fs.existsSync(p)) { envPath = p; break; }
+}
+if (!envPath) envPath = envCandidates[1]; // fallback
 
-const envPath = path.join(__dirname, '..', '.env');
-const env = dotenv.config({ path: envPath }).parsed || {};
+const envResult = dotenv.config({ path: envPath });
+const env = envResult.parsed || {};
+
+// ─── 诊断日志 ──────────────────────────────────────────────────────
+console.log('[api-server][DIAG] __dirname:', __dirname);
+console.log('[api-server][DIAG] envPath:', envPath);
+console.log('[api-server][DIAG] candidates checked:', envCandidates.join(', '));
+console.log('[api-server][DIAG] dotenv parsed VITE_QWEN_API_BASE:', JSON.stringify(env.VITE_QWEN_API_BASE));
+// API Key 脱敏：只显示前 4 位
+const _maskedKey = env.VITE_QWEN_API_KEY ? env.VITE_QWEN_API_KEY.slice(0, 4) + '***' : '(MISSING)';
+console.log('[api-server][DIAG] dotenv parsed VITE_QWEN_API_KEY:', _maskedKey);
+if (envResult.error) {
+  console.error('[api-server][DIAG] dotenv error:', envResult.error.message);
+}
+console.log('[api-server][DIAG] all env keys:', Object.keys(env).filter(k => k.startsWith('VITE_')).join(', ') || '(none)');
+// ────────────────────────────────────────────────────────────────
 
 const QWEN_API_KEY = (env.VITE_QWEN_API_KEY || '').trim();
 const QWEN_API_BASE = (env.VITE_QWEN_API_BASE || '').trim();
@@ -33,6 +67,17 @@ const OSS_BUCKET = (env.VITE_OSS_BUCKET || '').trim();
 const OSS_REGION = (env.VITE_OSS_REGION || '').trim();
 const LLM_KEY = (env.VITE_EXPANSION_LLM_KEY || '').trim();
 const LLM_BASE = (env.VITE_EXPANSION_LLM_BASE || '').trim();
+
+// ─── 启动时校验 ──────────────────────────────────────────────────────
+if (!QWEN_API_BASE) {
+  console.error('[api-server][ERROR] VITE_QWEN_API_BASE is EMPTY after dotenv!');
+  console.error('[api-server][ERROR] envPath =', envPath);
+  console.error('[api-server][ERROR] Please verify .env file exists and contains VITE_QWEN_API_BASE');
+}
+if (!QWEN_API_KEY) {
+  console.error('[api-server][ERROR] VITE_QWEN_API_KEY is EMPTY after dotenv!');
+}
+// ────────────────────────────────────────────────────────────────────
 
 // ─── 工具函数 ─────────────────────────────────────────────────────────
 
@@ -78,6 +123,9 @@ function sendError(res, err, status = 500) {
  * 拼接 base + remaining path，确保只有一个 `/` 分隔。
  */
 function buildTargetUrl(base, remainingPath) {
+  if (!base) {
+    throw new Error(`[api-server] buildTargetUrl: base is empty! Cannot construct URL for path "${remainingPath}". Check that the corresponding environment variable is set in .env at ${envPath}.`);
+  }
   const cleanBase = base.replace(/\/+$/, '');
   const cleanPath = remainingPath.startsWith('/') ? remainingPath : '/' + remainingPath;
   return cleanBase + cleanPath;
@@ -539,43 +587,71 @@ function createRequestHandler(dbRouter) {
     // ─── Qwen DashScope ──────────────────────────────────────────
     const qwenRemain = matchRoute(rawUrl, '/api/qwen');
     if (qwenRemain !== null) {
-      const targetUrl = buildTargetUrl(QWEN_API_BASE, qwenRemain);
-      return proxyRequest(req, res, targetUrl, {
-        Authorization: `Bearer ${QWEN_API_KEY}`,
-      });
+      try {
+        const targetUrl = buildTargetUrl(QWEN_API_BASE, qwenRemain);
+        return proxyRequest(req, res, targetUrl, {
+          Authorization: `Bearer ${QWEN_API_KEY}`,
+        });
+      } catch (err) {
+        console.error('[api-server][qwen]', err.message);
+        res.statusCode = 502;
+        res.setHeader('Content-Type', 'application/json');
+        return res.end(JSON.stringify({ error: 'Configuration error', message: err.message }));
+      }
     }
 
     // ─── EvoLink (GPT-image-2 & Nano Banana 2) ──────────────────
     const evolinkRemain = matchRoute(rawUrl, '/api/evolink');
     if (evolinkRemain !== null) {
-      const targetUrl = buildTargetUrl(EVOLINK_API_BASE, evolinkRemain);
-      console.log('[api-server][evolink] targetUrl:', targetUrl);
-      return proxyRequest(req, res, targetUrl, {
-        Authorization: `Bearer ${EVOLINK_API_KEY}`,
-      });
+      try {
+        const targetUrl = buildTargetUrl(EVOLINK_API_BASE, evolinkRemain);
+        console.log('[api-server][evolink] targetUrl:', targetUrl);
+        return proxyRequest(req, res, targetUrl, {
+          Authorization: `Bearer ${EVOLINK_API_KEY}`,
+        });
+      } catch (err) {
+        console.error('[api-server][evolink]', err.message);
+        res.statusCode = 502;
+        res.setHeader('Content-Type', 'application/json');
+        return res.end(JSON.stringify({ error: 'Configuration error', message: err.message }));
+      }
     }
 
     // ─── Alibaba Cloud OSS ───────────────────────────────────────
     const ossRemain = matchRoute(rawUrl, '/api/oss');
     if (ossRemain !== null) {
-      const ossHost = `${OSS_BUCKET}.${OSS_REGION}.aliyuncs.com`;
-      const ossBase = `https://${ossHost}`;
-      const targetUrl = buildTargetUrl(ossBase, ossRemain);
-      return proxyRequest(req, res, targetUrl, {
-        'x-oss-access-key-id': OSS_ACCESS_KEY_ID,
-        'x-oss-access-key-secret': OSS_ACCESS_KEY_SECRET,
-        Host: ossHost,
-      });
+      try {
+        const ossHost = `${OSS_BUCKET}.${OSS_REGION}.aliyuncs.com`;
+        const ossBase = `https://${ossHost}`;
+        const targetUrl = buildTargetUrl(ossBase, ossRemain);
+        return proxyRequest(req, res, targetUrl, {
+          'x-oss-access-key-id': OSS_ACCESS_KEY_ID,
+          'x-oss-access-key-secret': OSS_ACCESS_KEY_SECRET,
+          Host: ossHost,
+        });
+      } catch (err) {
+        console.error('[api-server][oss]', err.message);
+        res.statusCode = 502;
+        res.setHeader('Content-Type', 'application/json');
+        return res.end(JSON.stringify({ error: 'Configuration error', message: err.message }));
+      }
     }
 
     // ─── Expansion LLM ───────────────────────────────────────────
     const llmRemain = matchRoute(rawUrl, '/api/llm');
     if (llmRemain !== null) {
-      const targetUrl = buildTargetUrl(LLM_BASE, llmRemain);
-      console.log('[api-server][llm] targetUrl:', targetUrl);
-      return proxyRequest(req, res, targetUrl, {
-        Authorization: `Bearer ${LLM_KEY}`,
-      });
+      try {
+        const targetUrl = buildTargetUrl(LLM_BASE, llmRemain);
+        console.log('[api-server][llm] targetUrl:', targetUrl);
+        return proxyRequest(req, res, targetUrl, {
+          Authorization: `Bearer ${LLM_KEY}`,
+        });
+      } catch (err) {
+        console.error('[api-server][llm]', err.message);
+        res.statusCode = 502;
+        res.setHeader('Content-Type', 'application/json');
+        return res.end(JSON.stringify({ error: 'Configuration error', message: err.message }));
+      }
     }
 
     // ─── Image Proxy (CORS) ──────────────────────────────────────
