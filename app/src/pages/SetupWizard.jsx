@@ -168,9 +168,9 @@ export default function SetupWizard() {
       if (modelId === 'qwen-image-3') {
         try {
           await axios.post('/api/qwen/', {
-            model: 'pre-qwen-image-3.0-preprocess-0703-t2iv1',
+            model: 'pre-qwen-image-3-preprocess-0706',
             input: { messages: [{ role: 'user', content: [{ text: 'test' }] }] },
-            parameters: { size: '256*256', n: 1, prompt_extend: false },
+            parameters: { size: '256*256', n: 1 },
           }, { timeout: 15000 });
           setTestResults((p) => ({ ...p, [modelId]: { ok: true, msg: `连接正常 (${Date.now() - start}ms)` } }));
         } catch (err) {

@@ -5,8 +5,7 @@
  * Image generation can take 30s–120s+ so we use a long timeout (5 min).
  *
  * Model names:
- *   T2I: pre-qwen-image-3.0-preprocess-0703-t2iv1
- *   I2I: pre-qwen-image-3.0-preprocess-0703-i2iv1
+ *   T2I/I2I: pre-qwen-image-3-preprocess-0706 (unified, server auto-routes)
  *
  * T2I size must be multiples of 16, I2I size multiples of 32.
  * Response image URL is valid for 24 hours – callers should download & cache.
@@ -14,8 +13,8 @@
 
 import { apiPost } from './client.js';
 
-const T2I_MODEL = 'pre-qwen-image-3.0-preprocess-0703-t2iv1';
-const I2I_MODEL = 'pre-qwen-image-3.0-preprocess-0703-i2iv1';
+const T2I_MODEL = 'pre-qwen-image-3-preprocess-0706';
+const I2I_MODEL = 'pre-qwen-image-3-preprocess-0706';
 
 /** 5-minute timeout for synchronous Qwen generation calls. */
 const QWEN_TIMEOUT_MS = 300_000;
@@ -52,7 +51,7 @@ export class QwenAdapter {
   /**
    * Text-to-image generation.
    * @param {string} prompt
-   * @param {Object} params - { size, n, seed, negative_prompt, prompt_extend, prompt_extend_mode, watermark }
+   * @param {Object} params - { size, n, seed, negative_prompt, watermark }
    * @param {AbortSignal} [signal]
    * @param {Function} [onProgress] - optional progress callback (percent)
    * @returns {Promise<{ images: Array<{ url: string }> }>}
@@ -62,8 +61,6 @@ export class QwenAdapter {
 
     // Build parameters – only include seed when it's a non-negative integer
     const parameters = {
-      prompt_extend: params.prompt_extend ?? true,
-      prompt_extend_mode: params.prompt_extend_mode ?? 'direct',
       n: params.n ?? 1,
       size,
       negative_prompt: params.negative_prompt ?? '',
@@ -73,6 +70,8 @@ export class QwenAdapter {
     if (params.seed !== undefined && params.seed >= 0) {
       parameters.seed = params.seed;
     }
+
+    console.log('[QwenAdapter] T2I generateImage parameters:', { ...parameters, prompt_extend: false, seed: parameters.seed ?? 'random (omitted)' });
 
     const body = {
       model: T2I_MODEL,
@@ -124,8 +123,6 @@ export class QwenAdapter {
 
     // Build parameters – only include seed when it's a non-negative integer
     const parameters = {
-      prompt_extend: params.prompt_extend ?? true,
-      prompt_extend_mode: params.prompt_extend_mode ?? 'direct',
       n: params.n ?? 1,
       size,
       negative_prompt: params.negative_prompt ?? '',
@@ -135,6 +132,8 @@ export class QwenAdapter {
     if (params.seed !== undefined && params.seed >= 0) {
       parameters.seed = params.seed;
     }
+
+    console.log('[QwenAdapter] I2I generateImage parameters:', { ...parameters, prompt_extend: false, seed: parameters.seed ?? 'random (omitted)' });
 
     // Build content array: images first, then text
     const content = [

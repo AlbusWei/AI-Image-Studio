@@ -4,8 +4,7 @@
 
 | 模型名 | 场景 | 说明 |
 | --- | --- | --- |
-| `pre-qwen-image-3.0-preprocess-0703-t2iv1` | 文生图 (T2I) | T2I 版本 1 |
-| `pre-qwen-image-3.0-preprocess-0703-i2iv1` | 图生图 (I2I) | I2I 版本 1 |
+| `pre-qwen-image-3-preprocess-0706` | 文生图 (T2I) / 图生图 (I2I) | 统一模型，服务端根据请求内容自动路由 |
 
 ## 接口地址
 
@@ -216,6 +215,6 @@ curl --location 'https://poc-dashscope.aliyuncs.com/api/v1/services/aigc/multimo
 
 | 我想要... | model | content 中放什么 |
 | --- | --- | --- |
-| 用文字生成图片 | `pre-qwen-image-3.0-preprocess-0703-t2iv1` | `[{"text": "..."}]` |
-| 用图片+指令编辑 | `pre-qwen-image-3.0-preprocess-0703-i2iv1` | `[{"image": "..."}, {"text": "..."}]` |
-| 多图参考编辑 | `pre-qwen-image-3.0-preprocess-0703-i2iv1` | `[{"image": "..."}, {"image": "..."}, {"text": "..."}]` |
+| 用文字生成图片 | `pre-qwen-image-3-preprocess-0706` | `[{"text": "..."}]` |
+| 用图片+指令编辑 | `pre-qwen-image-3-preprocess-0706` | `[{"image": "..."}, {"text": "..."}]` |
+| 多图参考编辑 | `pre-qwen-image-3-preprocess-0706` | `[{"image": "..."}, {"image": "..."}, {"text": "..."}]` |
