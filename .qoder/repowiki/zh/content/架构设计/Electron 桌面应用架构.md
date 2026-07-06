@@ -394,8 +394,12 @@ Open --> Ready["门面可用(db.*)"]
   - Settings: getAll/set/get
   - CasePackages: add/list/update/delete
 - 特性
-  - 从 .env 读取密钥与基础地址
+  - 从 .env 读取密钥与基础地址（多候选路径策略 + `app.getAppPath()`）
   - 统一代理逻辑：读取请求体、拼接目标 URL、注入额外头、回写状态码与响应头、返回 body
+  - buildTargetUrl 防御性校验：base 为空时抛出明确错误
+  - validateBaseUrl 启动时 URL 合法性检查
+  - 诊断日志 API Key 脱敏（前 4 位 + `***`）
+  - SSRF 防护：`/api/proxy-image` 拦截内网地址
   - 错误处理：502 代理错误、404 未匹配、参数校验失败
   - 二进制文件上传/下载支持（图片文件、缩略图）
 - **新增** Buffer优化
@@ -770,6 +774,14 @@ GAL --> STO["services/storage.js"]
 - REST API 502/404
   - 检查 .env 变量是否正确；确认上游服务可达；查看日志中的 targetUrl 与 headers
   - 确认/api/db端点是否正确路由到数据库查询层
+  - 检查启动诊断日志中的 `envPath` 和 `candidates checked`，确认 .env 文件是否在多候选路径中被找到
+  - 若 Base URL 为空，检查 validateBaseUrl 是否已在启动时打印错误日志
+- 环境变量加载失败
+  - 确认 `__dirname` 的实际值（启动诊断日志中有打印）
+  - 确认 .env 文件是否在 `__dirname`、`__dirname/..`、`__dirname/../app`、`__dirname/app` 或 `app.getAppPath()` 其中之一
+  - 确认 electron-builder.yml 的 files 中包含 `.env`
+- SSRF 403
+  - `/api/proxy-image` 对内网地址返回 403 是预期行为，拦截 127.0.0.1、localhost、10.x、192.168.x、172.x 等地址
 - HTTP后端连接失败
   - 确认Electron主进程已启动且API服务器正在监听
   - 检查Vite代理配置是否正确指向19527端口
@@ -816,6 +828,10 @@ GAL --> STO["services/storage.js"]
   - base 设置为相对路径，适配 Electron 本地加载
   - 启用 api-proxy 插件用于开发期代理
   - Vite代理配置：/api/db → http://127.0.0.1:19527
+  - electron-builder.yml 的 files 中包含 `.env`，确保打包后环境变量可用
+- **新增** 环境变量加载策略
+  - Vite 插件：通过 `import.meta.url` 推导 APP_ROOT，不依赖 `server.config.root`
+  - Electron 服务器：多候选路径策略 + `app.getAppPath()`，兼容各种启动环境
 - **新增** 同步IPC调用配置
   - 使用sendSync进行端口获取，消除竞态条件
   - 在preload阶段完成端口注入

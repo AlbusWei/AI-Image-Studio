@@ -136,11 +136,12 @@ export default function apiProxyPlugin() {
       const env = loadEnv(server.config.mode, envDir, '');
 
       // ─── 诊断日志 ─────────────────────────────────────────────────
+      const maskKey = (key) => key ? key.slice(0, 4) + '***' : 'undefined';
       console.log('[api-proxy][DIAG] server.config.root:', server.config.root);
       console.log('[api-proxy][DIAG] envDir (resolved):', envDir);
       console.log('[api-proxy][DIAG] server.config.mode:', server.config.mode);
       console.log('[api-proxy][DIAG] loadEnv returned VITE_QWEN_API_BASE:', JSON.stringify(env.VITE_QWEN_API_BASE));
-      console.log('[api-proxy][DIAG] loadEnv returned VITE_QWEN_API_KEY:', env.VITE_QWEN_API_KEY ? '(present)' : '(MISSING)');
+      console.log('[api-proxy][DIAG] loadEnv returned VITE_QWEN_API_KEY:', maskKey(env.VITE_QWEN_API_KEY));
       console.log('[api-proxy][DIAG] all VITE_ env keys:', Object.keys(env).filter(k => k.startsWith('VITE_')).join(', ') || '(none)');
       // ──────────────────────────────────────────────────────────────
 
@@ -165,6 +166,17 @@ export default function apiProxyPlugin() {
       if (!QWEN_API_KEY) {
         console.error('[api-proxy][ERROR] VITE_QWEN_API_KEY is EMPTY after loadEnv!');
       }
+
+      // ─── URL 合法性校验 ─────────────────────────────────────────────
+      function validateBaseUrl(name, url) {
+        if (!url) return;
+        try { new URL(url); } catch (_) {
+          console.error(`[api-proxy][ERROR] ${name} is not a valid URL: "${url}"`);
+        }
+      }
+      validateBaseUrl('VITE_QWEN_API_BASE', QWEN_API_BASE);
+      validateBaseUrl('VITE_EVOLINK_API_BASE', EVOLINK_API_BASE);
+      validateBaseUrl('VITE_EXPANSION_LLM_BASE', LLM_BASE);
 
       // ─── Qwen DashScope ──────────────────────────────────────────────
       server.middlewares.use('/api/qwen', async (req, res, next) => {
@@ -252,6 +264,16 @@ export default function apiProxyPlugin() {
         }
         console.log('[api-proxy][proxy-image] Fetching:', imageUrl);
         try {
+          const parsed = new URL(imageUrl);
+          const blockedHosts = ['127.0.0.1', 'localhost', '169.254.169.254', '0.0.0.0'];
+          if (blockedHosts.includes(parsed.hostname) ||
+              parsed.hostname.startsWith('10.') ||
+              parsed.hostname.startsWith('192.168.') ||
+              parsed.hostname.startsWith('172.')) {
+            res.statusCode = 403;
+            res.end(JSON.stringify({ error: 'Internal addresses are not allowed' }));
+            return;
+          }
           const response = await fetch(imageUrl);
           if (!response.ok) {
             res.statusCode = response.status;

@@ -6,6 +6,7 @@ directories:
 files:
   - dist/**/*
   - electron/**/*
+  - .env
   - node_modules/sql.js/dist/sql-wasm.wasm
   - node_modules/sql.js/dist/sql-wasm.js
 asar: true

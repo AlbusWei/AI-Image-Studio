@@ -161,7 +161,7 @@ Note over Server,External : "异常时返回 502 JSON 错误"
 
 - **HTTP 服务器创建**：使用 Node.js http.createServer 创建独立服务器
 - **随机端口监听**：监听 127.0.0.1:0，系统自动分配可用端口
-- **环境变量加载**：通过 dotenv 模块从 .env 文件加载配置
+- **环境变量加载**：通过 dotenv 模块从 .env 文件加载配置，采用多候选路径策略（依次检查 `__dirname`、`__dirname/..`、`__dirname/../app`、`__dirname/app`），Electron 环境额外追加 `app.getAppPath()` 路径，确保各种运行环境下均能正确定位 .env
 - **路由匹配器**：自定义 matchRoute 函数支持精确前缀匹配
 - **统一请求处理**：handleRequest 函数集中处理所有路由逻辑
 
@@ -169,6 +169,7 @@ Note over Server,External : "异常时返回 502 JSON 错误"
 - [app/electron/api-server.cjs:236-247](file://app/electron/api-server.cjs#L236-L247)
 - [app/electron/api-server.cjs:133-143](file://app/electron/api-server.cjs#L133-L143)
 - [app/electron/api-server.cjs:145-228](file://app/electron/api-server.cjs#L145-L228)
+- [app/electron/api-server.cjs:21-60](file://app/electron/api-server.cjs#L21-L60)
 
 ### 动态端口发现机制
 **新增功能** - 解决 Electron 环境中 API 服务器端口动态分配的问题：
@@ -199,6 +200,7 @@ Note over Server,External : "异常时返回 502 JSON 错误"
 **功能增强** - 在嵌入式服务器中实现相同功能的图片代理：
 
 - **URL 参数验证**：检查必需的 url 参数是否存在
+- **SSRF 防护**：拦截对内网地址的请求（127.0.0.1、localhost、169.254.169.254、0.0.0.0、10.x、192.168.x、172.x），返回 403，防止服务端被利用访问内部网络
 - **外部请求转发**：使用 fetch 直接获取外部图片资源
 - **响应处理**：透传原始 Content-Type 并设置缓存控制
 - **错误处理**：区分上游错误和代理错误，返回适当的状态码
@@ -206,6 +208,7 @@ Note over Server,External : "异常时返回 502 JSON 错误"
 
 **章节来源**
 - [app/electron/api-server.cjs:190-222](file://app/electron/api-server.cjs#L190-L222)
+- [app/src/server/api-proxy.js:256-294](file://app/src/server/api-proxy.js#L256-L294)
 
 ### proxyImageUrl 工具函数
 **功能增强** - 支持 Electron 环境的智能 URL 重写：
@@ -247,12 +250,14 @@ CORS 代理功能已在多个组件中集成，部分组件需要更新以使用
 - [app/electron/api-server.cjs:40-47](file://app/electron/api-server.cjs#L40-L47)
 
 ### 目标 URL 构建
+- **防御性校验**：当 base 为空时抛出明确错误，提示检查 .env 中对应的环境变量，避免拼出无效 URL
 - **路径清理**：去除 base 末尾多余斜杠
 - **路径连接**：保证 path 以单个斜杠连接
 - **通用性**：用于拼接 Qwen/EvoLink/OSS/LLM 的基础地址与具体路径
 
 **章节来源**
-- [app/electron/api-server.cjs:52-56](file://app/electron/api-server.cjs#L52-L56)
+- [app/electron/api-server.cjs:139-146](file://app/electron/api-server.cjs#L139-L146)
+- [app/src/server/api-proxy.js:51-58](file://app/src/server/api-proxy.js#L51-L58)
 
 ### 通用代理流程
 - **请求头合并**：合并 extraHeaders 与 Content-Type
@@ -274,8 +279,17 @@ CORS 代理功能已在多个组件中集成，部分组件需要更新以使用
 
 这些变量仅在 Node 环境可用，不会被打包进浏览器代码。
 
+**环境变量加载策略**：
+- **api-proxy.js（Vite 插件）**：通过 `import.meta.url` + `fileURLToPath` + `resolve` 从插件文件位置向上两级推导 `APP_ROOT`，作为 `loadEnv` 的 envDir，不再依赖 `server.config.root`（后者在嵌套项目结构下可能不指向 `app/`）
+- **api-server.cjs（Electron 服务器）**：采用多候选路径策略，依次检查 `__dirname`、`__dirname/..`、`__dirname/../app`、`__dirname/app`，Electron 环境时额外追加 `app.getAppPath()` 路径
+
+**启动时校验**：
+- `validateBaseUrl` 函数在启动阶段对所有 Base URL 执行 `new URL()` 校验，不合法时打印错误日志
+- 诊断日志中的 API Key 使用 `maskKey` 脱敏处理（前 4 位 + `***`），避免完整密钥泄露
+
 **章节来源**
-- [app/electron/api-server.cjs:24-33](file://app/electron/api-server.cjs#L24-L33)
+- [app/electron/api-server.cjs:21-94](file://app/electron/api-server.cjs#L21-L94)
+- [app/src/server/api-proxy.js:18-20](file://app/src/server/api-proxy.js#L18-L20)
 
 ### 客户端集成与环境自适应
 **重大更新** - 支持双环境运行的智能客户端：
@@ -339,6 +353,7 @@ PLUG --> VENV["Vite loadEnv<br/>开发环境配置"]
 - **CORS 图片代理优化**：提供 24 小时缓存控制，显著减少重复请求
 - **端口动态分配**：避免端口冲突，提高部署灵活性
 - **环境自适应**：自动检测运行环境，提供最佳的性能体验
+- **安全增强**：SSRF 防护拦截内网地址请求、API Key 日志脱敏、启动时 URL 合法性校验、buildTargetUrl 空值防御
 
 **章节来源**
 - [app/electron/api-server.cjs:61-116](file://app/electron/api-server.cjs#L61-L116)
@@ -354,6 +369,7 @@ PLUG --> VENV["Vite loadEnv<br/>开发环境配置"]
 - **端口管理**：系统自动分配可用端口，无需手动配置
 - **环境隔离**：API 服务器与 UI 进程完全分离，提高稳定性
 - **生产就绪**：打包后的应用包含完整的代理服务，无需外部依赖
+- **环境变量打包**：electron-builder.yml 的 files 中已包含 `.env`，确保打包后的应用能正确加载环境变量。多候选路径策略确保在各种启动方式下均能定位到 .env 文件
 
 **章节来源**
 - [app/electron/main.cjs:96-102](file://app/electron/main.cjs#L96-L102)
@@ -399,6 +415,8 @@ Nginx/Apache/Caddy 反向代理配置思路：
 - **图片无法显示**：检查 CORS 代理是否正常工作，确认外部图片 URL 可访问
 - **端口冲突**：Electron 环境使用随机端口，避免手动配置端口冲突
 - **IPC 通信失败**：检查 preload 脚本是否正确暴露 getApiPort 接口
+- **环境变量加载失败**：检查启动日志中的诊断信息，确认 .env 文件是否在候选路径中被找到。Vite 插件环境下确认 `APP_ROOT` 是否正确指向 `app/`，Electron 环境下确认 `__dirname` 的实际值和多候选路径检查结果
+- **SSRF 403 拦截**：若图片代理返回 403，检查目标 URL 是否包含内网地址（如 127.0.0.1、10.x、192.168.x、172.x 等）
 
 ### 日志与监控
 - **嵌入式服务器日志**：打印请求方法、目标 URL、请求体大小、响应状态码、Content-Type 与响应体大小

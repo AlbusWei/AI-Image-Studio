@@ -28,11 +28,14 @@ const envCandidates = [
   path.join(__dirname, 'app', '.env'),
 ];
 // Electron 环境时追加 app.getAppPath()
-if (process.versions.electron) {
-  const electronApp = require('electron').app;
-  if (electronApp && typeof electronApp.getAppPath === 'function') {
-    envCandidates.unshift(path.join(electronApp.getAppPath(), '.env'));
-  }
+let electronApp;
+try {
+  electronApp = require('electron').app;
+} catch (_) {
+  electronApp = null;
+}
+if (electronApp && typeof electronApp.getAppPath === 'function') {
+  envCandidates.unshift(path.join(electronApp.getAppPath(), '.env'));
 }
 let envPath;
 for (const p of envCandidates) {
@@ -44,13 +47,13 @@ const envResult = dotenv.config({ path: envPath });
 const env = envResult.parsed || {};
 
 // ─── 诊断日志 ──────────────────────────────────────────────────────
+const maskKey = (key) => key ? key.slice(0, 4) + '***' : 'undefined';
 console.log('[api-server][DIAG] __dirname:', __dirname);
 console.log('[api-server][DIAG] envPath:', envPath);
 console.log('[api-server][DIAG] candidates checked:', envCandidates.join(', '));
 console.log('[api-server][DIAG] dotenv parsed VITE_QWEN_API_BASE:', JSON.stringify(env.VITE_QWEN_API_BASE));
 // API Key 脱敏：只显示前 4 位
-const _maskedKey = env.VITE_QWEN_API_KEY ? env.VITE_QWEN_API_KEY.slice(0, 4) + '***' : '(MISSING)';
-console.log('[api-server][DIAG] dotenv parsed VITE_QWEN_API_KEY:', _maskedKey);
+console.log('[api-server][DIAG] dotenv parsed VITE_QWEN_API_KEY:', maskKey(env.VITE_QWEN_API_KEY));
 if (envResult.error) {
   console.error('[api-server][DIAG] dotenv error:', envResult.error.message);
 }
@@ -77,6 +80,17 @@ if (!QWEN_API_BASE) {
 if (!QWEN_API_KEY) {
   console.error('[api-server][ERROR] VITE_QWEN_API_KEY is EMPTY after dotenv!');
 }
+
+// ─── URL 合法性校验 ─────────────────────────────────────────────────
+function validateBaseUrl(name, url) {
+  if (!url) return;
+  try { new URL(url); } catch (_) {
+    console.error(`[api-server][ERROR] ${name} is not a valid URL: "${url}"`);
+  }
+}
+validateBaseUrl('VITE_QWEN_API_BASE', QWEN_API_BASE);
+validateBaseUrl('VITE_EVOLINK_API_BASE', EVOLINK_API_BASE);
+validateBaseUrl('VITE_EXPANSION_LLM_BASE', LLM_BASE);
 // ────────────────────────────────────────────────────────────────────
 
 // ─── 工具函数 ─────────────────────────────────────────────────────────
@@ -668,6 +682,16 @@ function createRequestHandler(dbRouter) {
       }
       console.log('[api-server][proxy-image] Fetching:', imageUrl);
       try {
+        const imgParsed = new URL(imageUrl);
+        const blockedHosts = ['127.0.0.1', 'localhost', '169.254.169.254', '0.0.0.0'];
+        if (blockedHosts.includes(imgParsed.hostname) ||
+            imgParsed.hostname.startsWith('10.') ||
+            imgParsed.hostname.startsWith('192.168.') ||
+            imgParsed.hostname.startsWith('172.')) {
+          res.statusCode = 403;
+          res.end(JSON.stringify({ error: 'Internal addresses are not allowed' }));
+          return;
+        }
         const response = await fetch(imageUrl);
         if (!response.ok) {
           res.statusCode = response.status;
