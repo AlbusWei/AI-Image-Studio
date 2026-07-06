@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   X, ChevronLeft, ChevronRight, Star, Trash2, RefreshCw,
   Pin, Pencil, FolderOpen, Lightbulb, Download,
@@ -10,14 +10,18 @@ import { useGalleryStore } from '../stores/useGalleryStore';
 import { updateImage, addCasePackage } from '../db/database';
 import StorageService from '../services/storage';
 import { proxyImageUrl } from '../services/api/client';
+import { useLazyLoadUrl } from '../hooks/useLazyLoadUrl';
 
 function getImageDisplayUrl(img) {
   if (!img) return '';
   if (img.blobUrl) return img.blobUrl;
-  if (img.thumbnailUrl && img.thumbnailUrl.startsWith('blob:')) return img.thumbnailUrl;
+  // 远程原图 URL 优先于缩略图
   const raw = img.url || img.sourceUrl || '';
   if (raw.startsWith('http://') || raw.startsWith('https://')) return proxyImageUrl(raw);
-  return raw;
+  if (raw) return raw;
+  // 缩略图作为最后手段
+  if (img.thumbnailUrl && img.thumbnailUrl.startsWith('blob:')) return img.thumbnailUrl;
+  return '';
 }
 function Lightbox({ isOpen, onClose, images = [], currentIndex = 0 }) {
   const [currentImageIndex, setCurrentImageIndex] = useState(currentIndex);
@@ -36,6 +40,14 @@ function Lightbox({ isOpen, onClose, images = [], currentIndex = 0 }) {
   const currentImage = images[currentImageIndex] || images[0] || {};
 
   useEffect(() => { setCurrentImageIndex(Math.max(0, currentIndex)); }, [currentIndex]);
+
+  // 懒加载原图 + blob URL 生命周期管理（含 OSS / sourceUrl fallback）
+  const { urls: fullImageUrls, revokeUrl } = useLazyLoadUrl(
+    isOpen,
+    currentImage?.id ?? null,
+    currentImage?.ossUrl ?? null,
+    currentImage?.sourceUrl ?? currentImage?.url ?? null
+  );
 
   // Load note from DB when image changes
   useEffect(() => {
@@ -83,10 +95,11 @@ function Lightbox({ isOpen, onClose, images = [], currentIndex = 0 }) {
 
   const handleDiscard = useCallback(() => {
     if (currentImage?.id) {
+      revokeUrl(currentImage.id);
       discardImage(currentImage.id);
       addToast('已淘汰', { type: 'info' });
     }
-  }, [currentImage, discardImage, addToast]);
+  }, [currentImage, discardImage, addToast, revokeUrl]);
 
   const handleRegenerate = useCallback(() => {
     regenerate();
@@ -110,7 +123,7 @@ function Lightbox({ isOpen, onClose, images = [], currentIndex = 0 }) {
   // 局部重绘: open mask editor with current image
   const handleInpaint = useCallback(async () => {
     try {
-      const imageUrl = getImageDisplayUrl(currentImage);
+      const imageUrl = fullImageUrls[currentImage?.id] || getImageDisplayUrl(currentImage);
       if (!imageUrl) {
         addToast('无法获取图片', { type: 'error' });
         return;
@@ -163,7 +176,7 @@ function Lightbox({ isOpen, onClose, images = [], currentIndex = 0 }) {
         params: currentImage.params || {},
         annotation: note || '',
         tags: currentImage.tags || [],
-        imageUrl: getImageDisplayUrl(currentImage),
+        imageUrl: fullImageUrls[currentImage?.id] || getImageDisplayUrl(currentImage),
         createdAt: Date.now(),
       });
       addToast('已加入知识库', { type: 'success' });
@@ -301,7 +314,7 @@ function Lightbox({ isOpen, onClose, images = [], currentIndex = 0 }) {
             }}
           >
             {(() => {
-              const displayUrl = getImageDisplayUrl(currentImage);
+              const displayUrl = fullImageUrls[currentImage?.id] || getImageDisplayUrl(currentImage);
               return displayUrl ? (
                 <img
                   src={displayUrl}

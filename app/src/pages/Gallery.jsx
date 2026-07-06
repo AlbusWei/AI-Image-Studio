@@ -10,6 +10,7 @@ import { useGalleryStore } from '../stores/useGalleryStore'
 import { useUIStore } from '../stores/useUIStore'
 import { useGenerationStore } from '../stores/useGenerationStore'
 import { proxyImageUrl } from '../services/api/client'
+import { useLazyLoadUrl } from '../hooks/useLazyLoadUrl'
 import * as db from '../db/database'
 
 const SEARCH_TYPES = [
@@ -25,17 +26,44 @@ const FILTER_CONFIG = [
   { key: 'fav', label: '收藏', options: [{ value: 'all', label: '全部' }, { value: 'only', label: '仅收藏' }] },
 ]
 
+/**
+ * Grid display: prefer blobUrl (same-session), then thumbnail blob (fast local),
+ * then remote URL via proxy, then thumbnailUrl as last resort.
+ */
 function getImageDisplayUrl(img) {
-  // blob URLs are local memory URLs, use them first (fastest)
+  if (!img) return ''
+  // Same-session blob URL (original, fastest)
   if (img.blobUrl) return img.blobUrl
-  // thumbnail blob URL
+  // Thumbnail blob URL (fast local preview)
   if (img.thumbnailUrl && img.thumbnailUrl.startsWith('blob:')) return img.thumbnailUrl
-  // For remote URLs (http/https), wrap with CORS proxy
-  const raw = img.thumbnailUrl || img.url || img.sourceUrl || ''
-  if (raw.startsWith('http://') || raw.startsWith('https://')) {
-    return proxyImageUrl(raw)
+  // Remote original URL via proxy (better quality than thumbnail)
+  const raw = img.url || img.sourceUrl || ''
+  if (raw.startsWith('http://') || raw.startsWith('https://')) return proxyImageUrl(raw)
+  if (raw) return raw
+  // Remote thumbnail URL as last resort
+  if (img.thumbnailUrl && (img.thumbnailUrl.startsWith('http://') || img.thumbnailUrl.startsWith('https://'))) {
+    return proxyImageUrl(img.thumbnailUrl)
   }
-  return raw
+  return img.thumbnailUrl || ''
+}
+
+/**
+ * Detail panel display: prioritise remote original URL over thumbnail.
+ * Used when the lazy-loaded blob URL is not yet available.
+ */
+function getDetailDisplayUrl(img) {
+  if (!img) return ''
+  if (img.blobUrl) return img.blobUrl
+  // Remote original URL via proxy (full quality)
+  const raw = img.url || img.sourceUrl || ''
+  if (raw.startsWith('http://') || raw.startsWith('https://')) return proxyImageUrl(raw)
+  if (raw) return raw
+  // OSS URL
+  if (img.ossUrl) return proxyImageUrl(img.ossUrl)
+  // Thumbnail as last resort
+  if (img.thumbnailUrl && img.thumbnailUrl.startsWith('blob:')) return img.thumbnailUrl
+  if (img.thumbnailUrl) return proxyImageUrl(img.thumbnailUrl)
+  return ''
 }
 function getAspectLabel(img) {
   if (!img.width || !img.height) return null
@@ -94,6 +122,14 @@ export default function Gallery() {
   const [collapsedGroups, setCollapsedGroups] = useState([])
   const [selectedImage, setSelectedImage] = useState(null)
   const [hoveredImg, setHoveredImg] = useState(null)
+
+  // 详情面板：懒加载原图（含 OSS / sourceUrl fallback）
+  const { urls: detailImageUrls } = useLazyLoadUrl(
+    !!selectedImage,
+    selectedImage?.id ?? null,
+    selectedImage?.ossUrl ?? null,
+    selectedImage?.sourceUrl ?? selectedImage?.url ?? null
+  )
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, image: null })
   const [displayCount, setDisplayCount] = useState(50)
   const [showFolderPicker, setShowFolderPicker] = useState(false)
@@ -487,7 +523,10 @@ export default function Gallery() {
             <button className="btn-icon" onClick={closeImageDetail}><X size={16} /></button>
           </div>
           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
-            {getImageDisplayUrl(selectedImage) ? <img src={getImageDisplayUrl(selectedImage)} alt="" style={{ height: 240, objectFit: 'cover', borderRadius: 'var(--radius-base)', cursor: 'pointer' }} onClick={() => openLightbox(selectedImage.id)} /> : <div style={{ height: 240, borderRadius: 'var(--radius-base)', background: 'var(--bg-elevated)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ImageOff size={40} style={{ color: 'var(--text-muted)', opacity: 0.3 }} /></div>}
+            {(() => {
+              const detailUrl = detailImageUrls[selectedImage?.id] || getDetailDisplayUrl(selectedImage);
+              return detailUrl ? <img src={detailUrl} alt="" style={{ height: 240, objectFit: 'cover', borderRadius: 'var(--radius-base)', cursor: 'pointer' }} onClick={() => openLightbox(selectedImage.id)} /> : <div style={{ height: 240, borderRadius: 'var(--radius-base)', background: 'var(--bg-elevated)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ImageOff size={40} style={{ color: 'var(--text-muted)', opacity: 0.3 }} /></div>
+            })()}
             <div><h3 className="text-xs font-semibold mb-2" style={{ color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 'var(--ls-wide)' }}>提示词</h3><p className="text-sm" style={{ color: 'var(--text-secondary)', lineHeight: 'var(--lh-relaxed)' }}>{selectedImage.prompt}</p></div>
             <div className="flex items-center gap-2"><span className="badge badge-accent">{selectedImage.model}</span><span className="text-xs" style={{ color: 'var(--text-muted)' }}><Calendar size={10} style={{ display: 'inline', verticalAlign: -1, marginRight: 2 }} />{selectedImage.createdAt ? new Date(selectedImage.createdAt).toLocaleDateString('zh-CN') : ''}</span></div>
             <div>
