@@ -69,6 +69,10 @@ VITE_OSS_BUCKET=your-bucket
 ## 项目结构
 ```
 app/
+├── bin/                   # CLI 命令行工具
+│   ├── ais.mjs            # CLI 入口 (commander)
+│   ├── setup.mjs          # 环境初始化 (dotenv + axios)
+│   └── commands/          # 12 个命令实现
 ├── electron/              # Electron main 进程
 │   ├── main.cjs           # 入口，窗口创建 + 模块初始化
 │   ├── preload.cjs        # contextBridge 安全 API
@@ -94,3 +98,19 @@ app/
 ├── electron-builder.yml   # 打包配置
 └── .env                   # 环境变量
 ```
+
+## CLI 命令行工具
+
+项目内置 CLI 工具 `ais`，支持通过命令行执行生图、查询、管理等操作。
+
+```bash
+# 调用方式
+node bin/ais.mjs <command> [options]
+
+# 查看帮助
+node bin/ais.mjs --help
+```
+
+前置条件：需要 Electron 应用（或至少 api-server）在运行。
+
+详细用法参见 [CLI 用法指南](../docs/CLI-USAGE.md)。
