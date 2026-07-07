@@ -42,6 +42,16 @@ function createWindow(getDbRef, fileManagerRef) {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
 
+  // 将渲染进程 console 输出转发到主进程终端（dev 模式）
+  if (isDev) {
+    mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+      const levelMap = { 0: 'LOG', 1: 'WARN', 2: 'ERROR', 3: 'INFO' };
+      const tag = levelMap[level] || 'LOG';
+      const src = sourceId ? ` (${sourceId}:${line})` : '';
+      console.log(`[Renderer:${tag}]${src} ${message}`);
+    });
+  }
+
   // 页面加载完成：记录 URL + 首次加载时执行 IndexedDB → SQLite 迁移
   mainWindow.webContents.on('did-finish-load', () => {
     const url = mainWindow.webContents.getURL();

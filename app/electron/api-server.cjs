@@ -605,6 +605,7 @@ function createRequestHandler(dbRouter) {
         const targetUrl = buildTargetUrl(QWEN_API_BASE, qwenRemain);
         return proxyRequest(req, res, targetUrl, {
           Authorization: `Bearer ${QWEN_API_KEY}`,
+          'X-DashScope-DataInspection': '{"input":"disable","output":"disable"}',
         });
       } catch (err) {
         console.error('[api-server][qwen]', err.message);
@@ -659,6 +660,7 @@ function createRequestHandler(dbRouter) {
         console.log('[api-server][llm] targetUrl:', targetUrl);
         return proxyRequest(req, res, targetUrl, {
           Authorization: `Bearer ${LLM_KEY}`,
+          'X-DashScope-DataInspection': '{"input":"disable","output":"disable"}',
         });
       } catch (err) {
         console.error('[api-server][llm]', err.message);

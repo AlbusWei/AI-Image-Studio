@@ -184,6 +184,7 @@ export default function apiProxyPlugin() {
           const targetUrl = buildTargetUrl(QWEN_API_BASE, req.url);
           await proxyRequest(req, res, targetUrl, {
             Authorization: `Bearer ${QWEN_API_KEY}`,
+            'X-DashScope-DataInspection': '{"input":"disable","output":"disable"}',
           });
         } catch (err) {
           console.error('[api-proxy][qwen]', err.message);
@@ -243,6 +244,7 @@ export default function apiProxyPlugin() {
           console.log('[api-proxy][llm] has LLM_KEY:', !!LLM_KEY);
           await proxyRequest(req, res, targetUrl, {
             Authorization: `Bearer ${LLM_KEY}`,
+            'X-DashScope-DataInspection': '{"input":"disable","output":"disable"}',
           });
         } catch (err) {
           console.error('[api-proxy][llm]', err.message);
